@@ -1,4 +1,5 @@
 #include <iostream>
+#include <iomanip>
 #include <stdint.h>
 #include <cassert>
 
@@ -317,6 +318,29 @@ std::vector<code> make_huffman_table(const std::vector<uint8_t>& symbol_bit_leng
     return codes;
 }
 
+auto make_default_huffman_table()
+{
+/*
+   Lit Value    Bits        Codes
+   ---------    ----        -----
+     0 - 143     8          00110000 through
+                            10111111
+   144 - 255     9          110010000 through
+                            111111111
+   256 - 279     7          0000000 through
+                            0010111
+   280 - 287     8          11000000 through
+                            11000111
+*/
+    std::vector<uint8_t> sbl(num_symbols);
+    int i = 0;
+    while (i < 144) sbl[i++] = 8;
+    while (i < 256) sbl[i++] = 9;
+    while (i < 280) sbl[i++] = 7;
+    while (i < num_symbols) sbl[i++] = 8;
+    return make_huffman_table(sbl);
+}
+
 void test_make_huffman_table()
 {
     // Example from rfc1951 3.2.2
@@ -331,6 +355,19 @@ void test_make_huffman_table()
         { 2,   0b00 },
         { 4, 0b1110 },
         { 4, 0b1111 }}));
+
+   auto cs = make_default_huffman_table();
+   for (int i = 0; i < num_symbols; ++i) {
+       auto expected = [i] () {
+           if (i < 144) return code{8, static_cast<uint32_t>(0b00110000  + (i - 0))};
+           if (i < 256) return code{9, static_cast<uint32_t>(0b110010000 + (i - 144))};
+           if (i < 280) return code{7, static_cast<uint32_t>(0b0000000   + (i - 256))};
+           assert(i < num_symbols);
+           return code{8, static_cast<uint32_t>(0b11000000  + (i - 280))};
+       }();
+       const auto& c = cs[i];
+       assert(c == expected);
+   }
 }
 
 enum class block_type { uncompressed, fixed_huffman, dynamic_huffman, reserved };
