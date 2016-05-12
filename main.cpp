@@ -101,9 +101,8 @@ bool operator==(const code& l, const code& r) { return l.len == r.len && l.value
 bool operator!=(const code& l, const code& r) { return !(l == r); }
 std::ostream& operator<<(std::ostream& os, const code& c) {
     auto v = c.value;
-    for (int i = 0; i < c.len; ++i) {
-        os << (v & 1);
-        v >>= 1;
+    for (int i = c.len-1; i >= 0; --i) {
+        os << ((v >> i) & 1);
     }
     return os;
 }
@@ -190,14 +189,13 @@ private:
     static code bit_added(const code& c, uint8_t bit) {
         assert(c.len < UINT8_MAX - 1);
         assert(bit == 0 || bit == 1);
-        return { static_cast<uint8_t>(c.len + 1), (c.value << 1) | bit };
+        return { static_cast<uint8_t>(c.len + 1), c.value | (static_cast<uint32_t>(bit) << c.len) };
     }
 
     static bool consume_bit(code& c) {
         assert(c.valid());
-        const auto mask = 1 << (c.len - 1);
-        const bool ret = (c.value & mask) != 0;
-        c.value &= ~mask;
+        const bool ret = (c.value & 1) != 0;
+        c.value >>= 1;
         c.len--;
         return ret;
     }
@@ -238,7 +236,7 @@ void test_huffman_tree()
     {
         constexpr code a_code{ 2, 0b00  };
         constexpr code b_code{ 1, 0b1   };
-        constexpr code c_code{ 3, 0b011 };
+        constexpr code c_code{ 3, 0b110 };
         constexpr code d_code{ 3, 0b010 };
         huffman_tree t;
         t.add('A', a_code);
@@ -255,9 +253,9 @@ void test_huffman_tree()
         assert(t.symbol_code('D') == d_code);
     }
     {
-        constexpr code a_code{ 2, 0b10  };
+        constexpr code a_code{ 2, 0b01  };
         constexpr code b_code{ 1, 0b0   };
-        constexpr code c_code{ 3, 0b110 };
+        constexpr code c_code{ 3, 0b011 };
         constexpr code d_code{ 3, 0b111 };
         huffman_tree t;
         t.add('A', a_code);
@@ -286,6 +284,8 @@ std::ostream& operator<<(std::ostream& os, const std::vector<T>& v) {
 
 void test_make_huffman_table()
 {
+    // Example from rfc1951 3.2.2
+
     std::vector<uint8_t> bit_lengths{3, 3, 3, 3, 3, 2, 4, 4};
     const auto max_bit_length = *std::max_element(begin(bit_lengths), end(bit_lengths));
     // Count the number of codes for each code length. Let bl_count[N] be the number of codes of length N, N >= 1.
