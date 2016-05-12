@@ -107,6 +107,8 @@ std::ostream& operator<<(std::ostream& os, const code& c) {
     return os;
 }
 
+static constexpr int num_symbols = 288;
+
 class huffman_tree {
 public:
     explicit huffman_tree() {
@@ -158,8 +160,7 @@ public:
     }
 
 private:
-    static constexpr int num_symbols = 256;
-    static constexpr int max_nodes   = 285-256;
+    static constexpr int max_nodes          = 32;
     static constexpr int invalid_edge_value = num_symbols + max_nodes;
 
     struct node {
@@ -282,20 +283,14 @@ std::ostream& operator<<(std::ostream& os, const std::vector<T>& v) {
     return os;
 }
 
-void test_make_huffman_table()
+std::vector<code> make_huffman_table(const std::vector<uint8_t>& symbol_bit_lengths)
 {
-    // Example from rfc1951 3.2.2
-
-    std::vector<uint8_t> bit_lengths{3, 3, 3, 3, 3, 2, 4, 4};
-    const auto max_bit_length = *std::max_element(begin(bit_lengths), end(bit_lengths));
+    const auto max_bit_length = *std::max_element(begin(symbol_bit_lengths), end(symbol_bit_lengths));
     // Count the number of codes for each code length. Let bl_count[N] be the number of codes of length N, N >= 1.
     std::vector<int> bl_count(max_bit_length+1);
-    for (const auto& bl : bit_lengths) {
+    for (const auto& bl : symbol_bit_lengths) {
         ++bl_count[bl];
     }
-
-    std::cout << "bl_count = " << bl_count << "\n";
-
 
     //  Find the numerical value of the smallest code for each code length
     int code = 0;
@@ -304,23 +299,38 @@ void test_make_huffman_table()
     for (int bits = 1; bits <= max_bit_length; bits++) {
         code = (code + bl_count[bits-1]) << 1;
         next_code[bits] = code;
-        std::cout << "next_code[" << bits << "] = " << code << '\n';
     }
 
     // Assign numerical values to all codes, using consecutive values for all codes of the same length with the base
     // values determined at step 2. Codes that are never used (which have a bit length of zero) must not be assigned
     // a value.
 
-    constexpr int max_code = 'H'-'A';
-    for (int n = 0; n <= max_code; n++) {
-        const auto len = bit_lengths[n];//len = tree[n].Len;
+    std::vector<::code> codes(symbol_bit_lengths.size());
+    for (int n = 0; n < (int)codes.size(); n++) {
+        const auto len = symbol_bit_lengths[n];//len = tree[n].Len;
         if (len != 0) {
             //tree[n].Code = next_code[len];
-            const auto c = ::code{len, next_code[len]};
-            std::cout << (char)(n + 'A') << " " << c << "\n";
+            codes[n] = ::code{len, next_code[len]};
             next_code[len]++;
         }
     }
+    return codes;
+}
+
+void test_make_huffman_table()
+{
+    // Example from rfc1951 3.2.2
+    std::vector<uint8_t> symbol_bit_lengths{3, 3, 3, 3, 3, 2, 4, 4};
+    auto codes = make_huffman_table(symbol_bit_lengths);
+    assert(codes == (std::vector<code>{
+        { 3,  0b010 },
+        { 3,  0b011 },
+        { 3,  0b100 },
+        { 3,  0b101 },
+        { 3,  0b110 },
+        { 2,   0b00 },
+        { 4, 0b1110 },
+        { 4, 0b1111 }}));
 }
 
 enum class block_type { uncompressed, fixed_huffman, dynamic_huffman, reserved };
