@@ -91,6 +91,11 @@ void test_bit_stream()
 struct code {
     uint8_t  len;
     uint32_t value;
+
+    bool valid() const {
+        return len > 0 && len <= 8 * sizeof(value) && (value >> len) == 0;
+
+    }
 };
 bool operator==(const code& l, const code& r) { return l.len == r.len && l.value == r.value; }
 bool operator!=(const code& l, const code& r) { return !(l == r); }
@@ -103,33 +108,45 @@ std::ostream& operator<<(std::ostream& os, const code& c) {
     return os;
 }
 
-code bit_added(const code& c, uint8_t bit) {
-    assert(c.len < UINT8_MAX - 1);
-    assert(bit == 0 || bit == 1);
-    return { static_cast<uint8_t>(c.len + 1), (c.value << 1) | bit };
-}
-
 class huffman_tree {
 public:
     explicit huffman_tree() {
-        nodes_[0].left   = num_symbols+1;
-        nodes_[0].right  = 'B';
-        nodes_[1].left   = 'A';
-        nodes_[1].right  = num_symbols+2;
-        nodes_[2].left   = 'D';
-        nodes_[2].right  = 'C';
     }
 
-    int symbol(const code& c) const {
-        assert(c.len > 0 && c.len <= 8 * sizeof(c.value));
-        assert((c.value >> c.len) == 0);
+    void add(int symbol, const code& symbol_code) {
+        assert(symbol_code.valid());
+        auto c = symbol_code;
+
+        if (num_nodes == 0) {
+            alloc_node();
+        }
+
         int index = 0;
-        for (int bit = c.len - 1; bit > 0; --bit) {
-            index = node_value(index, ((c.value >> bit) & 1) != 0);
+        // Create non-leaf nodes
+        while (c.len > 1) {
+            auto& edge = branch(index, consume_bit(c));
+            if (edge == invalid_edge_value) {
+                edge = alloc_node();
+            }
+            assert(edge >= num_symbols);
+            index = edge - num_symbols;
+        }
+        auto& edge = branch(index, consume_bit(c));
+        assert(edge == invalid_edge_value);
+        edge = symbol;
+    }
+
+    int symbol(const code& symbol_code) const {
+        assert(symbol_code.valid());
+        auto c = symbol_code;
+        int index = 0;
+        while (c.len > 1) {
+            index = branch(index, consume_bit(c));
             assert(index >= num_symbols);
             index -= num_symbols;
         }
-        const auto ret = node_value(index, (c.value & 1) != 0);
+
+        const auto ret = branch(index, consume_bit(c));
         assert(ret < num_symbols);
         return ret;
     }
@@ -137,25 +154,59 @@ public:
     code symbol_code(int symbol) const {
         code c{};
         coder(symbol, 0, c);
+        assert(c.valid());
         return c;
     }
 
 private:
     static constexpr int num_symbols = 256;
-    static constexpr int max_nodes   = 3;//285-256;
+    static constexpr int max_nodes   = 285-256;
+    static constexpr int invalid_edge_value = num_symbols + max_nodes;
 
     struct node {
         int left;
         int right;
     };
 
-    node nodes_[max_nodes];
+    int num_nodes = 0;
+    node nodes[max_nodes];
+
+    int& branch(int index, bool right) {
+        assert(index < num_nodes);
+        auto& n = nodes[index];
+        return right ? n.right : n.left;
+    }
+    const int& branch(int index, bool right) const {
+        return const_cast<huffman_tree&>(*this).branch(index, right);
+    }
+
+    int alloc_node() {
+        assert(num_nodes < max_nodes);
+        nodes[num_nodes].left  = invalid_edge_value;
+        nodes[num_nodes].right = invalid_edge_value;
+        return (num_nodes++) + num_symbols;
+    }
+
+    static code bit_added(const code& c, uint8_t bit) {
+        assert(c.len < UINT8_MAX - 1);
+        assert(bit == 0 || bit == 1);
+        return { static_cast<uint8_t>(c.len + 1), (c.value << 1) | bit };
+    }
+
+    static bool consume_bit(code& c) {
+        assert(c.valid());
+        const auto mask = 1 << (c.len - 1);
+        const bool ret = (c.value & mask) != 0;
+        c.value &= ~mask;
+        c.len--;
+        return ret;
+    }
 
     bool coder(int symbol, int index, code& c) const {
         const auto orig = c;
 
-        assert(index < max_nodes);
-        auto& n = nodes_[index];
+        assert(index < num_nodes);
+        auto& n = nodes[index];
         const auto l = bit_added(c, 0);
         const auto r = bit_added(c, 1);
 
@@ -180,35 +231,48 @@ private:
         c = orig;
         return false;
     }
-
-    int node_value(int index, bool right) const {
-        assert(index < max_nodes);
-        auto& n = nodes_[index];
-        return right ? n.right : n.left;
-    }
 };
 
 void test_huffman_tree()
 {
-    constexpr code a_code{ 2, 0b00  };
-    constexpr code b_code{ 1, 0b1   };
-    constexpr code c_code{ 3, 0b011 };
-    constexpr code d_code{ 3, 0b010 };
-    huffman_tree t;
-    assert(t.symbol(a_code) == 'A');
-    assert(t.symbol(b_code) == 'B');
-    assert(t.symbol(c_code) == 'C');
-    assert(t.symbol(d_code) == 'D');
-    assert(t.symbol_code('A') == a_code);
-    assert(t.symbol_code('B') == b_code);
-    assert(t.symbol_code('C') == c_code);
-    assert(t.symbol_code('D') == d_code);
-#if 0
-        A     
-        B     0b1
-        C     0b011
-        D     0b010
-#endif
+    {
+        constexpr code a_code{ 2, 0b00  };
+        constexpr code b_code{ 1, 0b1   };
+        constexpr code c_code{ 3, 0b011 };
+        constexpr code d_code{ 3, 0b010 };
+        huffman_tree t;
+        t.add('A', a_code);
+        t.add('B', b_code);
+        t.add('C', c_code);
+        t.add('D', d_code);
+        assert(t.symbol(a_code) == 'A');
+        assert(t.symbol(b_code) == 'B');
+        assert(t.symbol(c_code) == 'C');
+        assert(t.symbol(d_code) == 'D');
+        assert(t.symbol_code('A') == a_code);
+        assert(t.symbol_code('B') == b_code);
+        assert(t.symbol_code('C') == c_code);
+        assert(t.symbol_code('D') == d_code);
+    }
+    {
+        constexpr code a_code{ 2, 0b10  };
+        constexpr code b_code{ 1, 0b0   };
+        constexpr code c_code{ 3, 0b110 };
+        constexpr code d_code{ 3, 0b111 };
+        huffman_tree t;
+        t.add('A', a_code);
+        t.add('B', b_code);
+        t.add('C', c_code);
+        t.add('D', d_code);
+        assert(t.symbol(a_code) == 'A');
+        assert(t.symbol(b_code) == 'B');
+        assert(t.symbol(c_code) == 'C');
+        assert(t.symbol(d_code) == 'D');
+        assert(t.symbol_code('A') == a_code);
+        assert(t.symbol_code('B') == b_code);
+        assert(t.symbol_code('C') == c_code);
+        assert(t.symbol_code('D') == d_code);
+    }
 }
 
 enum class block_type { uncompressed, fixed_huffman, dynamic_huffman, reserved };
@@ -288,5 +352,5 @@ int main()
     const uint8_t deflate_input2[12] = {0xf3, 0xc9, 0xcc, 0x4b, 0x55, 0x30, 0xe4, 0x02, 0x53, 0x46, 0x5c, 0x00};
     const uint8_t expected_output[14] = { 'L', 'i', 'n', 'e', ' ', '1', '\n', 'L', 'i', 'n', 'e', ' ', '2', '\n'};
     bit_stream bs{deflate_input1};
-    deflate(bs);
+    //deflate(bs);
 }
