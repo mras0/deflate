@@ -275,6 +275,54 @@ void test_huffman_tree()
     }
 }
 
+#include <vector>
+#include <algorithm>
+
+template<typename T>
+std::ostream& operator<<(std::ostream& os, const std::vector<T>& v) {
+    for (const auto& e : v) os << e << " ";
+    return os;
+}
+
+void test_make_huffman_table()
+{
+    std::vector<uint8_t> bit_lengths{3, 3, 3, 3, 3, 2, 4, 4};
+    const auto max_bit_length = *std::max_element(begin(bit_lengths), end(bit_lengths));
+    // Count the number of codes for each code length. Let bl_count[N] be the number of codes of length N, N >= 1.
+    std::vector<int> bl_count(max_bit_length+1);
+    for (const auto& bl : bit_lengths) {
+        ++bl_count[bl];
+    }
+
+    std::cout << "bl_count = " << bl_count << "\n";
+
+
+    //  Find the numerical value of the smallest code for each code length
+    int code = 0;
+    assert(bl_count[0] == 0);
+    std::vector<uint32_t> next_code(max_bit_length+1);
+    for (int bits = 1; bits <= max_bit_length; bits++) {
+        code = (code + bl_count[bits-1]) << 1;
+        next_code[bits] = code;
+        std::cout << "next_code[" << bits << "] = " << code << '\n';
+    }
+
+    // Assign numerical values to all codes, using consecutive values for all codes of the same length with the base
+    // values determined at step 2. Codes that are never used (which have a bit length of zero) must not be assigned
+    // a value.
+
+    constexpr int max_code = 'H'-'A';
+    for (int n = 0; n <= max_code; n++) {
+        const auto len = bit_lengths[n];//len = tree[n].Len;
+        if (len != 0) {
+            //tree[n].Code = next_code[len];
+            const auto c = ::code{len, next_code[len]};
+            std::cout << (char)(n + 'A') << " " << c << "\n";
+            next_code[len]++;
+        }
+    }
+}
+
 enum class block_type { uncompressed, fixed_huffman, dynamic_huffman, reserved };
 std::ostream& operator<<(std::ostream& os, block_type t) {
     switch (t) {
@@ -348,6 +396,7 @@ int main()
 {
     test_bit_stream();
     test_huffman_tree();
+    test_make_huffman_table();
     const uint8_t deflate_input1[13] = {0xf3, 0xc9, 0xcc, 0x4b, 0x55, 0x30, 0xe4, 0xf2, 0x01, 0x51, 0x46, 0x5c, 0x00};
     const uint8_t deflate_input2[12] = {0xf3, 0xc9, 0xcc, 0x4b, 0x55, 0x30, 0xe4, 0x02, 0x53, 0x46, 0x5c, 0x00};
     const uint8_t expected_output[14] = { 'L', 'i', 'n', 'e', ' ', '1', '\n', 'L', 'i', 'n', 'e', ' ', '2', '\n'};
