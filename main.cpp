@@ -160,8 +160,20 @@ public:
         return c;
     }
 
+    void show(std::ostream& os) const {
+        for (int i = 0; i < num_nodes; ++i) {
+            os << std::setw(3) << i << " ";
+            if (nodes[i].left >= num_symbols) os << "*" << (nodes[i].left - num_symbols);
+            else os << (char)nodes[i].left;
+            os << " ";
+            if (nodes[i].right >= num_symbols) os << "*" << (nodes[i].right - num_symbols);
+            else os << (char)nodes[i].right;
+            os << "\n";
+        }
+    }
+
 private:
-    static constexpr int max_nodes          = 32;
+    static constexpr int max_nodes          = num_symbols;
     static constexpr int invalid_edge_value = num_symbols + max_nodes;
 
     struct node {
@@ -191,13 +203,14 @@ private:
     static code bit_added(const code& c, uint8_t bit) {
         assert(c.len < UINT8_MAX - 1);
         assert(bit == 0 || bit == 1);
-        return { static_cast<uint8_t>(c.len + 1), c.value | (static_cast<uint32_t>(bit) << c.len) };
+        return { static_cast<uint8_t>(c.len + 1), (c.value << 1) | static_cast<uint32_t>(bit) };
     }
 
     static bool consume_bit(code& c) {
         assert(c.valid());
-        const bool ret = (c.value & 1) != 0;
-        c.value >>= 1;
+        const auto mask = 1 << (c.len - 1);
+        const bool ret  = (c.value & mask) != 0;
+        c.value &= ~mask;
         c.len--;
         return ret;
     }
@@ -238,7 +251,7 @@ void test_huffman_tree()
     {
         constexpr code a_code{ 2, 0b00  };
         constexpr code b_code{ 1, 0b1   };
-        constexpr code c_code{ 3, 0b110 };
+        constexpr code c_code{ 3, 0b011 };
         constexpr code d_code{ 3, 0b010 };
         huffman_tree t;
         t.add('A', a_code);
@@ -255,9 +268,9 @@ void test_huffman_tree()
         assert(t.symbol_code('D') == d_code);
     }
     {
-        constexpr code a_code{ 2, 0b01  };
+        constexpr code a_code{ 2, 0b10  };
         constexpr code b_code{ 1, 0b0   };
-        constexpr code c_code{ 3, 0b011 };
+        constexpr code c_code{ 3, 0b110 };
         constexpr code d_code{ 3, 0b111 };
         huffman_tree t;
         t.add('A', a_code);
@@ -356,18 +369,27 @@ void test_make_huffman_table()
         { 4, 0b1110 },
         { 4, 0b1111 }}));
 
-   auto cs = make_default_huffman_table();
-   for (int i = 0; i < num_symbols; ++i) {
-       auto expected = [i] () {
-           if (i < 144) return code{8, static_cast<uint32_t>(0b00110000  + (i - 0))};
-           if (i < 256) return code{9, static_cast<uint32_t>(0b110010000 + (i - 144))};
-           if (i < 280) return code{7, static_cast<uint32_t>(0b0000000   + (i - 256))};
-           assert(i < num_symbols);
-           return code{8, static_cast<uint32_t>(0b11000000  + (i - 280))};
-       }();
-       const auto& c = cs[i];
-       assert(c == expected);
-   }
+    huffman_tree t;
+    for (int i = 0; i < (int)symbol_bit_lengths.size(); ++i) {
+        t.add('A' + i, codes[i]);
+    }
+
+    auto cs = make_default_huffman_table();
+    for (int i = 0; i < num_symbols; ++i) {
+        auto expected = [i]() {
+            if (i < 144) return code{8, static_cast<uint32_t>(0b00110000  + (i - 0))};
+            if (i < 256) return code{9, static_cast<uint32_t>(0b110010000 + (i - 144))};
+            if (i < 280) return code{7, static_cast<uint32_t>(0b0000000   + (i - 256))};
+            assert(i < num_symbols);
+            return code{8, static_cast<uint32_t>(0b11000000  + (i - 280))};
+        }();
+        const auto& c = cs[i];
+        assert(c == expected);
+    }
+    huffman_tree t2;
+    for (int i = 0; i < num_symbols; ++i) {
+        t2.add(i, cs[i]);
+    }
 }
 
 enum class block_type { uncompressed, fixed_huffman, dynamic_huffman, reserved };
