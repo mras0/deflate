@@ -3,18 +3,40 @@
 #include <string>
 #include <stdint.h>
 #include <cassert>
+#include <array>
 
+constexpr uint32_t crc32_poly = 0xedb88320; // 0x04C11DB7 reversed
+
+constexpr uint32_t crc32_one_bit(uint32_t c)
+{
+    return c & 1 ? crc32_poly ^ (c >> 1) : c >> 1;
+}
+
+constexpr uint32_t crc32_one_byte(uint32_t c)
+{
+    return crc32_one_bit(crc32_one_bit(crc32_one_bit(crc32_one_bit(crc32_one_bit(crc32_one_bit(crc32_one_bit(crc32_one_bit(c))))))));
+}
+
+#define USE_CRC32_TABLE
+#ifdef USE_CRC32_TABLE
+template<size_t... is>
+constexpr std::array<uint32_t, 256> make_crc32_table(std::index_sequence<is...>)
+{
+    return { crc32_one_byte(is)... };
+}
+
+constexpr std::array<uint32_t, 256> crc32_table = make_crc32_table(std::make_index_sequence<256>());
+#endif
 
 uint32_t crc32(uint32_t crc, const uint8_t* beg, const uint8_t* end)
 {
-    constexpr uint32_t poly = 0xedb88320; // 0x04C11DB7 reversed
     crc ^= ~0U;
     for (auto p = beg; p != end; ++p) {
-        //crc = crc32_tab[(crc ^ *p) & 0xff] ^ (crc >> 8);
-        crc ^= *p;
-        for (int bit = 0; bit < 8; ++bit) {
-            crc = (crc & 1) ? (crc >> 1) ^ poly : crc >> 1;
-        }
+#ifdef USE_CRC32_TABLE
+        crc = crc32_table[(crc ^ *p) & 0xff] ^ (crc >> 8);
+#else
+        crc = crc32_one_byte(crc ^ *p);
+#endif
     }
     crc ^= ~0U;
     return crc;
@@ -455,8 +477,7 @@ void test_make_huffman_table()
             assert(i < num_symbols);
             return code{8, static_cast<uint32_t>(0b11000000  + (i - 280))};
         }();
-        const auto& c = cs[i];
-        assert(c == expected);
+        assert(cs[i] == expected);
     }
     huffman_tree t2;
     for (int i = 0; i < num_symbols; ++i) {
