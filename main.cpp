@@ -4,6 +4,28 @@
 #include <stdint.h>
 #include <cassert>
 
+
+uint32_t crc32(uint32_t crc, const uint8_t* beg, const uint8_t* end)
+{
+    constexpr uint32_t poly = 0xedb88320; // 0x04C11DB7 reversed
+    crc ^= ~0U;
+    for (auto p = beg; p != end; ++p) {
+        //crc = crc32_tab[(crc ^ *p) & 0xff] ^ (crc >> 8);
+        crc ^= *p;
+        for (int bit = 0; bit < 8; ++bit) {
+            crc = (crc & 1) ? (crc >> 1) ^ poly : crc >> 1;
+        }
+    }
+    crc ^= ~0U;
+    return crc;
+}
+
+void test_crc32()
+{
+    const uint8_t d[14] = { 'L', 'i', 'n', 'e', ' ', '1', '\n', 'L', 'i', 'n', 'e', ' ', '2', '\n'};
+    assert(0x87E4F545 == crc32(0, d, d+sizeof(d)));
+}
+
 /*
 * Data elements are packed into bytes in order of
 increasing bit number within the byte, i.e., starting
@@ -709,12 +731,15 @@ void gunzip(const std::string& filename)
     }
     std::cout.write(reinterpret_cast<const char*>(output.data()), output.size());
 
-    std::cout << "CRC32 " << std::hex << crc32 << std::dec << "\n";
+    if (::crc32(0, output.data(), output.data() + output.size()) != crc32) {
+        invalid();
+    }
 }
 
 int main()
 {
     try {
+        test_crc32();
         test_bit_stream();
         test_huffman_tree();
         test_make_huffman_table();
