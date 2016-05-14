@@ -84,6 +84,11 @@ public:
         }
     }
 
+    int potentially_available_bits() const {
+        const auto remaining = len_ - pos_;
+        return remaining >= 2 ? 16 : avail_ + 8 * remaining;
+    }
+
     uint32_t peek_bits(int num_bits) {
         assert(num_bits > 0 && num_bits <= avail_);
         return bits_ & ((1 << num_bits) - 1);
@@ -122,17 +127,20 @@ void test_bit_stream()
     const uint8_t data[] = { 0x5a, 0xa5 }; // 01011010 10100101
     {
         bit_stream bs{data};
+        CHECK(bs.potentially_available_bits() == 16);
         CHECK(bs.get_bits(16) == 0xa55a);
         CHECK(bs.available_bits() == 0);
     }
     {
         bit_stream bs{data};
         CHECK(bs.get_bits(8) == 0x5a);
+        CHECK(bs.potentially_available_bits() == 8);
         CHECK(bs.get_bits(8) == 0xa5);
     }
     {
         bit_stream bs{data};
         CHECK(bs.get_bits(4) == 0xa);
+        CHECK(bs.potentially_available_bits() == 12);
         CHECK(bs.get_bits(4) == 0x5);
     }
     {
@@ -148,6 +156,7 @@ void test_bit_stream()
         CHECK(bs.get_bit() == 1);
         CHECK(bs.get_bit() == 0);
         CHECK(bs.available_bits() >= 5);
+        CHECK(bs.potentially_available_bits() == 13);
         bs.ensure_bits(13);
         CHECK(bs.available_bits() >= 13);
         CHECK(bs.get_bit() == 1);
@@ -613,10 +622,13 @@ std::ostream& operator<<(std::ostream& os, block_type t) {
 
 int decode(const huffman_tree& t, bit_stream& bs)
 {
-    bs.ensure_bits(t.table_bits());
-    auto te = t.next_from_bits(bs.peek_bits(t.table_bits()), t.table_bits());
-    bs.consume_bits(te.len);
-    int value = te.index;
+    int value = num_symbols;
+    if (bs.potentially_available_bits() >= t.table_bits()) {
+        bs.ensure_bits(t.table_bits());
+        auto te = t.next_from_bits(bs.peek_bits(t.table_bits()), t.table_bits());
+        bs.consume_bits(te.len);
+        value = te.index;
+    }
     while (value >= num_symbols) {
         value = t.branch(value - num_symbols, !!bs.get_bit());
     }
@@ -891,7 +903,7 @@ void write_huff_tree(const std::string& filename, const huffman_tree& tree) {
 void timing()
 {
     // Before optimizations: Min/Avg/Mean/Max: 245.635 / 262.008 / 249.782 / 347.802
-    // Use tables:           Min/Avg/Mean/Max: 166.918 / 171.466 / 169.422 / 199.329
+    // Use tables:           Min/Avg/Mean/Max: 164.282 / 170.603 / 168.520 / 204.303
     auto data = read_file("../bunny.tar.gz");
     constexpr int num_timings = 20;
     double timings[num_timings];
