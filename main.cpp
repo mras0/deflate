@@ -1,9 +1,11 @@
-#include <iostream>
-#include <iomanip>
 #include <string>
 #include <stdint.h>
 #include <cassert>
 #include <array>
+#include <utility>
+#include <ostream>
+
+#define CHECK(expr) do { if (!(expr)) abort(); } while (false)
 
 constexpr uint32_t crc32_poly = 0xedb88320; // 0x04C11DB7 reversed
 
@@ -47,7 +49,7 @@ uint32_t crc32(uint32_t crc, const uint8_t* beg, const uint8_t* end)
 void test_crc32()
 {
     const uint8_t d[14] = { 'L', 'i', 'n', 'e', ' ', '1', '\n', 'L', 'i', 'n', 'e', ' ', '2', '\n'};
-    assert(0x87E4F545 == crc32(0, d, d+sizeof(d)));
+    CHECK(0x87E4F545 == crc32(0, d, d+sizeof(d)));
 }
 
 /*
@@ -107,35 +109,35 @@ void test_bit_stream()
     const uint8_t data[] = { 0x5a, 0xa5 }; // 01011010 10100101
     {
         bit_stream bs{data};
-        assert(bs.get_bits(16) == 0xa55a);
+        CHECK(bs.get_bits(16) == 0xa55a);
     }
     {
         bit_stream bs{data};
-        assert(bs.get_bits(8) == 0x5a);
-        assert(bs.get_bits(8) == 0xa5);
+        CHECK(bs.get_bits(8) == 0x5a);
+        CHECK(bs.get_bits(8) == 0xa5);
     }
     {
         bit_stream bs{data};
-        assert(bs.get_bits(4) == 0xa);
-        assert(bs.get_bits(4) == 0x5);
+        CHECK(bs.get_bits(4) == 0xa);
+        CHECK(bs.get_bits(4) == 0x5);
     }
     {
         bit_stream bs{data};
-        assert(bs.get_bits(2) == 0x2);
-        assert(bs.get_bits(2) == 0x2);
-        assert(bs.get_bits(2) == 0x1);
-        assert(bs.get_bits(2) == 0x1);
+        CHECK(bs.get_bits(2) == 0x2);
+        CHECK(bs.get_bits(2) == 0x2);
+        CHECK(bs.get_bits(2) == 0x1);
+        CHECK(bs.get_bits(2) == 0x1);
     }
     {
         bit_stream bs{data};
-        assert(bs.get_bit() == 0);
-        assert(bs.get_bit() == 1);
-        assert(bs.get_bit() == 0);
-        assert(bs.get_bit() == 1);
-        assert(bs.get_bit() == 1);
-        assert(bs.get_bit() == 0);
-        assert(bs.get_bit() == 1);
-        assert(bs.get_bit() == 0);
+        CHECK(bs.get_bit() == 0);
+        CHECK(bs.get_bit() == 1);
+        CHECK(bs.get_bit() == 0);
+        CHECK(bs.get_bit() == 1);
+        CHECK(bs.get_bit() == 1);
+        CHECK(bs.get_bit() == 0);
+        CHECK(bs.get_bit() == 1);
+        CHECK(bs.get_bit() == 0);
     }
 }
 
@@ -240,7 +242,7 @@ public:
 
     void show(std::ostream& os) const {
         for (int i = 0; i < num_nodes; ++i) {
-            os << std::setw(3) << i << " ";
+            os << i << " ";
             if (nodes[i].left >= num_symbols) os << "*" << (nodes[i].left - num_symbols);
             else os << litrep(nodes[i].left);
             os << " ";
@@ -248,6 +250,30 @@ public:
             else os << litrep(nodes[i].right);
             os << "\n";
         }
+    }
+
+    void output_graph(std::ostream& os) const {
+        os << "digraph G {\n";
+
+        auto wr_val = [&](int val, const char* lab) {
+            std::string ltext = " [label=\"" + std::string(lab) + "\"]";
+            if (val >= num_symbols) os << "node" << (val - num_symbols) << ltext;
+            else if ((val >= 'A' && val <= 'Z') || (val >= 'a' && val <= 'z')) os << (char)val << ltext;
+            else os << "val" << val <<  ltext << "\nval" << val << "[label=\"" << val << "\"]";
+        };
+
+        for (int i = 0; i < num_nodes; ++i) {
+            os << "node" << i << " [label=\"\"]\n";
+
+            os << "node" << i << " -> ";
+            wr_val(nodes[i].left, "0");
+            os << "\n";
+
+            os << "node" << i << " -> ";
+            wr_val(nodes[i].right, "1");
+            os << "\n";
+        }
+        os << "}\n";
     }
 
 private:
@@ -327,14 +353,14 @@ void test_huffman_tree()
         t.add('B', b_code);
         t.add('C', c_code);
         t.add('D', d_code);
-        assert(t.symbol(a_code) == 'A');
-        assert(t.symbol(b_code) == 'B');
-        assert(t.symbol(c_code) == 'C');
-        assert(t.symbol(d_code) == 'D');
-        assert(t.symbol_code('A') == a_code);
-        assert(t.symbol_code('B') == b_code);
-        assert(t.symbol_code('C') == c_code);
-        assert(t.symbol_code('D') == d_code);
+        CHECK(t.symbol(a_code) == 'A');
+        CHECK(t.symbol(b_code) == 'B');
+        CHECK(t.symbol(c_code) == 'C');
+        CHECK(t.symbol(d_code) == 'D');
+        CHECK(t.symbol_code('A') == a_code);
+        CHECK(t.symbol_code('B') == b_code);
+        CHECK(t.symbol_code('C') == c_code);
+        CHECK(t.symbol_code('D') == d_code);
     }
     {
         constexpr code a_code{ 2, 0b10  };
@@ -346,14 +372,14 @@ void test_huffman_tree()
         t.add('B', b_code);
         t.add('C', c_code);
         t.add('D', d_code);
-        assert(t.symbol(a_code) == 'A');
-        assert(t.symbol(b_code) == 'B');
-        assert(t.symbol(c_code) == 'C');
-        assert(t.symbol(d_code) == 'D');
-        assert(t.symbol_code('A') == a_code);
-        assert(t.symbol_code('B') == b_code);
-        assert(t.symbol_code('C') == c_code);
-        assert(t.symbol_code('D') == d_code);
+        CHECK(t.symbol(a_code) == 'A');
+        CHECK(t.symbol(b_code) == 'B');
+        CHECK(t.symbol(c_code) == 'C');
+        CHECK(t.symbol(d_code) == 'D');
+        CHECK(t.symbol_code('A') == a_code);
+        CHECK(t.symbol_code('B') == b_code);
+        CHECK(t.symbol_code('C') == c_code);
+        CHECK(t.symbol_code('D') == d_code);
     }
 }
 
@@ -455,7 +481,7 @@ void test_make_huffman_table()
     // Example from rfc1951 3.2.2
     std::vector<uint8_t> symbol_bit_lengths{3, 3, 3, 3, 3, 2, 4, 4};
     auto codes = make_huffman_table(symbol_bit_lengths);
-    assert(codes == (std::vector<code>{
+    CHECK(codes == (std::vector<code>{
         { 3,  0b010 },
         { 3,  0b011 },
         { 3,  0b100 },
@@ -479,7 +505,7 @@ void test_make_huffman_table()
             assert(i < num_symbols);
             return code{8, static_cast<uint32_t>(0b11000000  + (i - 280))};
         }();
-        assert(cs[i] == expected);
+        CHECK(cs[i] == expected);
     }
     huffman_tree t2;
     for (int i = 0; i < num_symbols; ++i) {
@@ -615,6 +641,11 @@ std::vector<uint8_t> deflate(bit_stream& bs)
 
                 lit_len_tree = make_huffman_tree(make_huffman_table(cl2.data(), cl2.data() + hlit));
                 dist_tree    = make_huffman_tree(make_huffman_table(cl2.data() + hlit, cl2.data() + hlit + hdist));
+
+                //static int n = 0;
+                //write_huff_tree("lit"+std::to_string(n)+".gv", lit_len_tree);
+                //write_huff_tree("dist"+std::to_string(n)+".gv", dist_tree);
+                //++n;
             } else {
                 assert(type == block_type::fixed_huffman);
                 lit_len_tree = make_huffman_tree(make_default_huffman_table());
@@ -675,22 +706,29 @@ void test_deflate()
     const uint8_t deflate_input2[12] = {0xf3, 0xc9, 0xcc, 0x4b, 0x55, 0x30, 0xe4, 0x02, 0x53, 0x46, 0x5c, 0x00};
     const std::vector<uint8_t> expected_output{ 'L', 'i', 'n', 'e', ' ', '1', '\n', 'L', 'i', 'n', 'e', ' ', '2', '\n'};
     bit_stream bs1{deflate_input1};
-    assert(deflate(bs1) == expected_output);
+    CHECK(deflate(bs1) == expected_output);
     bit_stream bs2{deflate_input2};
-    assert(deflate(bs2) == expected_output);
+    CHECK(deflate(bs2) == expected_output);
 }
 
 #include <fstream>
-void gunzip(const std::string& filename)
+std::vector<uint8_t> read_file(const std::string& filename)
 {
     std::ifstream in(filename, std::ios_base::binary);
     if (!in) throw std::runtime_error(filename + " not found");
     in.seekg(0, std::ios_base::end);
     const auto file_size = static_cast<int>(in.tellg());
-    if (file_size < 18) throw std::runtime_error(filename + " is too small to be a gzip file");
     in.seekg(0, std::ios_base::beg);
     std::vector<uint8_t> input(file_size);
     in.read(reinterpret_cast<char*>(&input[0]), input.size());
+    return input;
+}
+
+std::vector<uint8_t> gunzip(const std::string& filename)
+{
+    const auto input     = read_file(filename);
+    const int  file_size = static_cast<int>(input.size());
+    if (file_size < 18) throw std::runtime_error(filename + " is too small to be a gzip file");
 
 
     auto invalid = [&filename] () { throw std::runtime_error(filename + " is not a valid gzip file"); };
@@ -722,10 +760,10 @@ void gunzip(const std::string& filename)
         return {};
     };
     if (flg & FNAME) {
-        std::cout << "Filename: " << get_zero_terminated_string() << std::endl;
+        get_zero_terminated_string(); // filename
     }
     if (flg & FCOMMENT) {
-        std::cout << "Comment: " << get_zero_terminated_string() << std::endl;
+        get_zero_terminated_string(); // comment
     }
     if (flg & FHCRC) {
         pos += 2; // skip 16-bit header CRC
@@ -748,11 +786,46 @@ void gunzip(const std::string& filename)
     if (output.size() != isize) {
         invalid();
     }
-    std::cout.write(reinterpret_cast<const char*>(output.data()), output.size());
 
     if (::crc32(0, output.data(), output.data() + output.size()) != crc32) {
         invalid();
     }
+
+    return output;
+}
+
+#include <chrono>
+#include <iostream>
+#include <iomanip>
+
+void write_huff_tree(const std::string& filename, const huffman_tree& tree) {
+    std::ofstream ofile(filename);
+    tree.output_graph(ofile);
+}
+
+void timing()
+{
+    // Before optimizations:
+    // Min/Avg/Mean/Max: 245.635 / 262.008 / 249.782 / 347.802
+    auto data = read_file("../bunny.tar.gz");
+    constexpr int num_timings = 20;
+    double timings[num_timings];
+    double sum = 0.0;
+    for (int i = 0; i < num_timings; ++i) {
+        const auto start = std::chrono::high_resolution_clock::now();
+        bit_stream bs{data.data() + 20, data.data() + data.size() - 8};
+        deflate(bs);
+        const auto end = std::chrono::high_resolution_clock::now();
+        timings[i] = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(end - start).count();
+        std::cout << timings[i] << "\n";
+        sum += timings[i];
+    }
+    std::sort(timings, timings + num_timings);
+    std::cout << "Min/Avg/Mean/Max: ";
+    std::cout << timings[0] << " / ";
+    std::cout << sum/num_timings << " / ";
+    std::cout << timings[num_timings/2] << " / ";
+    std::cout << timings[num_timings-1] << std::endl;
 }
 
 int main()
@@ -763,8 +836,9 @@ int main()
         test_huffman_tree();
         test_make_huffman_table();
         test_deflate();
-        gunzip("../CMakeLists.txt.gz");
-        gunzip("../main.cpp.gz");
+        //gunzip("../CMakeLists.txt.gz");
+        //gunzip("../main.cpp.gz");
+        timing();
     } catch (const std::exception& e) {
         std::cerr << e.what() << "\n";
         return 1;
