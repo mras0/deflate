@@ -16,6 +16,9 @@ significant bit of the code.
 
 class bit_stream {
 public:
+    explicit bit_stream(const uint8_t* begin, const uint8_t* end) : data_(begin), len_(static_cast<int>(end - begin)) {
+    }
+
     template<int size>
     explicit bit_stream(const uint8_t (&data)[size]) : data_(data), len_(size) {
     }
@@ -109,6 +112,7 @@ std::ostream& operator<<(std::ostream& os, const code& c) {
 }
 
 static constexpr int num_symbols = 288;
+static constexpr int max_bits    = 15;
 
 class huffman_tree {
 public:
@@ -301,6 +305,7 @@ std::ostream& operator<<(std::ostream& os, const std::vector<T>& v) {
 std::vector<code> make_huffman_table(const std::vector<uint8_t>& symbol_bit_lengths)
 {
     const auto max_bit_length = *std::max_element(begin(symbol_bit_lengths), end(symbol_bit_lengths));
+    assert(max_bit_length <= max_bits);
     // Count the number of codes for each code length. Let bl_count[N] be the number of codes of length N, N >= 1.
     std::vector<int> bl_count(max_bit_length+1);
     for (const auto& bl : symbol_bit_lengths) {
@@ -535,11 +540,8 @@ std::vector<uint8_t> deflate(bit_stream& bs)
     return output;
 }
 
-int main()
+void test_deflate()
 {
-    test_bit_stream();
-    test_huffman_tree();
-    test_make_huffman_table();
     const uint8_t deflate_input1[13] = {0xf3, 0xc9, 0xcc, 0x4b, 0x55, 0x30, 0xe4, 0xf2, 0x01, 0x51, 0x46, 0x5c, 0x00};
     const uint8_t deflate_input2[12] = {0xf3, 0xc9, 0xcc, 0x4b, 0x55, 0x30, 0xe4, 0x02, 0x53, 0x46, 0x5c, 0x00};
     const std::vector<uint8_t> expected_output{ 'L', 'i', 'n', 'e', ' ', '1', '\n', 'L', 'i', 'n', 'e', ' ', '2', '\n'};
@@ -547,4 +549,85 @@ int main()
     assert(deflate(bs1) == expected_output);
     bit_stream bs2{deflate_input2};
     assert(deflate(bs2) == expected_output);
+}
+
+#include <fstream>
+#include <string>
+void gunzip(const std::string& filename)
+{
+    std::ifstream in(filename, std::ios_base::binary);
+    if (!in) throw std::runtime_error(filename + " not found");
+    in.seekg(0, std::ios_base::end);
+    const auto file_size = static_cast<int>(in.tellg());
+    if (file_size < 18) throw std::runtime_error(filename + " is too small to be a gzip file");
+    in.seekg(0, std::ios_base::beg);
+    std::vector<uint8_t> input(file_size);
+    in.read(reinterpret_cast<char*>(&input[0]), input.size());
+
+
+    auto invalid = [&filename] () { throw std::runtime_error(filename + " is not a valid gzip file"); };
+
+    // +---+---+---+---+---+---+---+---+---+---+
+    // |ID1|ID2|CM |FLG|     MTIME      |XFL|OS|
+    // +---+---+---+---+---+---+---+---+---+---+
+    if (input[0] != 0x1f || // ID1
+        input[1] != 0x8b || // ID2
+        input[2] != 8) {    // CM
+        invalid();
+    }
+    enum { FTEXT=1, FHCRC=2, FEXTRA=4, FNAME=8, FCOMMENT=16 };
+    const auto flg = input[3];
+    int pos = 10;
+    if (flg & FEXTRA) {
+        const int xlen = input[pos] | (input[pos+1] << 8);
+        // TODO: Check whether it's valid to skip this many bytes
+        pos += 2 + xlen;
+    }
+    auto get_zero_terminated_string = [&] () -> std::string {
+        std::string res;
+        while (pos < file_size) {
+            const char c = input[pos++];
+            if (!c) return res;
+            res += c;
+        }
+        invalid();
+        return {};
+    };
+    if (flg & FNAME) {
+        std::cout << "Filename: " << get_zero_terminated_string() << std::endl;
+    }
+    if (flg & FCOMMENT) {
+        std::cout << "Comment: " << get_zero_terminated_string() << std::endl;
+    }
+    if (flg & FHCRC) {
+        pos += 2; // skip 16-bit header CRC
+    }
+    assert(file_size >= pos + 8);
+
+    int f = file_size - 8;
+    const auto crc32 = static_cast<uint32_t>(input[f + 0]) |
+        (static_cast<uint32_t>(input[f + 1]) << 8) |
+        (static_cast<uint32_t>(input[f + 2]) << 16) |
+        (static_cast<uint32_t>(input[f + 3]) << 24);
+
+    const auto isize = static_cast<uint32_t>(input[f + 4]) |
+        (static_cast<uint32_t>(input[f + 5]) << 8) |
+        (static_cast<uint32_t>(input[f + 6]) << 16) |
+        (static_cast<uint32_t>(input[f + 7]) << 24);
+
+    bit_stream bs(input.data() + pos, input.data() + file_size - 8);
+    const auto output = deflate(bs);
+    std::cout.write(reinterpret_cast<const char*>(output.data()), output.size());
+
+    std::cout << "CRC32 " << std::hex << crc32 << std::dec << "\n";
+    std::cout << "ISIZE " << isize << "\n";
+}
+
+int main()
+{
+    test_bit_stream();
+    test_huffman_tree();
+    test_make_huffman_table();
+    test_deflate();
+    gunzip("../main.cpp.gz");
 }
