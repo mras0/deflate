@@ -26,6 +26,8 @@ constexpr std::array<uint32_t, 256> make_crc32_table(std::index_sequence<is...>)
 }
 
 constexpr std::array<uint32_t, 256> crc32_table = make_crc32_table(std::make_index_sequence<256>());
+static_assert(crc32_table[0] == 0, "");
+static_assert(crc32_table[255] == 0x2d02ef8d, "");
 #endif
 
 uint32_t crc32(uint32_t crc, const uint8_t* beg, const uint8_t* end)
