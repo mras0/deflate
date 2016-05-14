@@ -512,10 +512,6 @@ int decode(const huffman_tree& t, bit_stream& bs)
 
 std::vector<uint8_t> deflate(bit_stream& bs)
 {
-    constexpr int min_match_distance_bytes          = 1;
-    constexpr int max_match_distance_bytes          = 32768;
-    constexpr int min_match_length_bytes            = 3;
-    constexpr int max_match_length_bytes            = 258;
     enum alphabet {
         lit_min      = 0,
         lit_max      = 255,
@@ -608,7 +604,7 @@ std::vector<uint8_t> deflate(bit_stream& bs)
                         count = 11 + bs.get_bits(7);
                     }
                     assert(cl_val <= max_bits);
-                    if (count + i > cl2.size()) invalid();
+                    if (static_cast<size_t>(count + i) > cl2.size()) invalid();
                     while (count--) {
                         //std::cout << (i > hlit ? "dist" : "lit") <<  "[" << (i > hlit ? i - hlit : i) << "] = " << (int)cl_val << std::endl;
                         cl2[i++] = cl_val;
@@ -657,7 +653,7 @@ std::vector<uint8_t> deflate(bit_stream& bs)
                     }
 
                     //std::cout << "<" << len << ", " << dist_bytes << ">" << std::endl;
-                    if (dist_bytes > output.size()) invalid();
+                    if (static_cast<size_t>(dist_bytes) > output.size()) invalid();
                     auto src = output.size() - dist_bytes;
                     for (int i = 0; i < len; ++i) {
                         //std::cout << litrep(output[src]);
