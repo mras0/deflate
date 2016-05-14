@@ -1,11 +1,13 @@
 #include <string>
+#include <iostream>
 #include <stdint.h>
 #include <cassert>
 #include <array>
+#include <vector>
 #include <utility>
 #include <ostream>
 
-#define CHECK(expr) do { if (!(expr)) abort(); } while (false)
+#define CHECK(expr) do { if (!(expr)) { std::cerr << #expr << std::endl; abort(); } } while (false)
 
 constexpr uint32_t crc32_poly = 0xedb88320; // 0x04C11DB7 reversed
 
@@ -72,19 +74,38 @@ public:
     explicit bit_stream(const uint8_t (&data)[size]) : data_(data), len_(size) {
     }
 
+    void ensure_bits(int num_bits) {
+        assert(num_bits > 0 && num_bits <= 16);
+        while (avail_ < num_bits) {
+            assert(pos_ < len_);
+            const auto b = data_[pos_++];
+            bits_   = (static_cast<uint32_t>(b) << avail_) | bits_;
+            avail_ += 8;
+        }
+    }
+
+    uint32_t peek_bits(int num_bits) {
+        assert(num_bits > 0 && num_bits <= avail_);
+        return bits_ & ((1 << num_bits) - 1);
+    }
+
+    void consume_bits(int num_bits) {
+        assert(num_bits > 0 && num_bits <= avail_);
+        avail_ -= num_bits;
+        bits_ >>= num_bits;
+    }
+
+    int available_bits() const {
+        return avail_;
+    }
+
     uint8_t get_bit() {
         return static_cast<uint8_t>(get_bits(1));
     }
-
     uint32_t get_bits(int num_bits) {
-        assert(num_bits > 0 && num_bits < 24);
-        while (avail_ < num_bits) {
-            bits_   = (static_cast<uint32_t>(get_byte()) << avail_) | bits_;
-            avail_ += 8;
-        }
-        const auto res = bits_ & ((1 << num_bits) - 1);
-        avail_ -= num_bits;
-        bits_ >>= num_bits;
+        ensure_bits(num_bits);
+        const auto res = peek_bits(num_bits);
+        consume_bits(num_bits);
         return res;
     }
 
@@ -94,14 +115,6 @@ private:
     int             pos_   = 0;
     uint32_t        bits_  = 0;
     int             avail_ = 0;
-
-    uint8_t get_byte() {
-        if (pos_ < len_) {
-            return data_[pos_++];
-        }
-        assert(false);
-        return 0;
-    }
 };
 
 void test_bit_stream()
@@ -110,6 +123,7 @@ void test_bit_stream()
     {
         bit_stream bs{data};
         CHECK(bs.get_bits(16) == 0xa55a);
+        CHECK(bs.available_bits() == 0);
     }
     {
         bit_stream bs{data};
@@ -133,6 +147,9 @@ void test_bit_stream()
         CHECK(bs.get_bit() == 0);
         CHECK(bs.get_bit() == 1);
         CHECK(bs.get_bit() == 0);
+        CHECK(bs.available_bits() >= 5);
+        bs.ensure_bits(13);
+        CHECK(bs.available_bits() >= 13);
         CHECK(bs.get_bit() == 1);
         CHECK(bs.get_bit() == 1);
         CHECK(bs.get_bit() == 0);
@@ -185,6 +202,9 @@ public:
     explicit huffman_tree() {
     }
 
+    // branch return value meaning:
+    //  0..num_symbols-1 symbol
+    //  num_symbol..     internal node (next index = return value - num_symbols)
     int& branch(int index, bool right) {
         assert(index < num_nodes);
         auto& n = nodes[index];
@@ -197,6 +217,7 @@ public:
 
     void add(int symbol, const code& symbol_code) {
         assert(symbol_code.valid());
+        assert(symbol_code.len <= max_bits);
         auto c = symbol_code;
 
         if (num_nodes == 0) {
@@ -276,6 +297,49 @@ public:
         os << "}\n";
     }
 
+    struct table_entry {
+        int len;
+        int index;
+    };
+
+    table_entry next_from_bits(uint32_t bits, int num_bits) const {
+        assert(!table.empty());
+        assert(num_bits >= table_bits()); (void)num_bits;
+        return table[bits & ((1 << table_bits_) -1)];
+    }
+
+    int table_bits() const {
+        return table_bits_;
+    }
+
+    void make_tables(int num_table_bits) {
+        assert(num_table_bits > 0);
+        assert(num_nodes > 0);
+        table_bits_ = num_table_bits;
+        int table_size = 1 << table_bits_;
+        table.resize(table_size);
+        for (int i = 0; i < table_size; ++i) {
+            table[i].index = num_symbols;
+            table[i].len = 0;
+            int val = i;
+            while (table[i].len < table_bits_ && table[i].index >= num_symbols) {
+                ++table[i].len;
+                table[i].index = branch(table[i].index - num_symbols, val&0x01);
+                val >>= 1;
+            }
+#if 0
+            for (int b=table_bits-1; b>=0; b--) std::cout << ((i>>b)&1);
+            if (table[i].index >= num_symbols)
+                std::cout << " " << table[i].index-num_symbols;
+            else
+                std::cout << " " << (char)table[i].index;
+            std::cout << " len = " << table[i].len << "\n";
+#endif
+        }
+    }
+
+
+
 private:
     static constexpr int max_nodes          = num_symbols;
     static constexpr int invalid_edge_value = num_symbols + max_nodes;
@@ -287,6 +351,9 @@ private:
 
     int num_nodes = 0;
     node nodes[max_nodes];
+
+    int table_bits_ = 0;
+    std::vector<table_entry> table;
 
     int alloc_node() {
         assert(num_nodes < max_nodes);
@@ -341,8 +408,14 @@ private:
     }
 };
 
+bool operator==(const huffman_tree::table_entry& l, const huffman_tree::table_entry& r)
+{
+    return l.len == r.len && l.index == r.index;
+}
+
 void test_huffman_tree()
 {
+    auto te = [] (int len, int index) { return huffman_tree::table_entry{len, index}; };
     {
         constexpr code a_code{ 2, 0b00  };
         constexpr code b_code{ 1, 0b1   };
@@ -361,6 +434,11 @@ void test_huffman_tree()
         CHECK(t.symbol_code('B') == b_code);
         CHECK(t.symbol_code('C') == c_code);
         CHECK(t.symbol_code('D') == d_code);
+        t.make_tables(4);
+        CHECK(t.next_from_bits(0b00, 4) == te(a_code.len, 'A'));
+        CHECK(t.next_from_bits(0b1,  8) == te(b_code.len, 'B'));
+        CHECK(t.next_from_bits(0b110, 4) == te(c_code.len, 'C'));
+        CHECK(t.next_from_bits(0b010, 12) == te(d_code.len, 'D'));
     }
     {
         constexpr code a_code{ 2, 0b10  };
@@ -380,6 +458,13 @@ void test_huffman_tree()
         CHECK(t.symbol_code('B') == b_code);
         CHECK(t.symbol_code('C') == c_code);
         CHECK(t.symbol_code('D') == d_code);
+        t.make_tables(2);
+        CHECK(t.next_from_bits(0b01, 2) == te(2, 'A'));
+        CHECK(t.next_from_bits(0b00, 2) == te(1, 'B'));
+        CHECK(t.next_from_bits(0b11, 2).len == 2);
+        CHECK(t.next_from_bits(0b11, 2).index >= num_symbols);
+        CHECK(t.branch(t.next_from_bits(0b11, 2).index-num_symbols, false) == 'C');
+        CHECK(t.branch(t.next_from_bits(0b11, 2).index-num_symbols, true) == 'D');
     }
 }
 
@@ -464,7 +549,7 @@ auto make_default_huffman_len_table()
     return make_huffman_table(length_bit_lengths);
 }
 
-huffman_tree make_huffman_tree(const std::vector<code>& codes)
+huffman_tree make_huffman_tree(const std::vector<code>& codes, int table_bits)
 {
     assert(codes.size() <= num_symbols);
     huffman_tree t;
@@ -473,6 +558,7 @@ huffman_tree make_huffman_tree(const std::vector<code>& codes)
             t.add(i, codes[i]);
         }
     }
+    t.make_tables(table_bits);
     return t;
 }
 
@@ -527,13 +613,12 @@ std::ostream& operator<<(std::ostream& os, block_type t) {
 
 int decode(const huffman_tree& t, bit_stream& bs)
 {
-    int value = 0;
-    for (;;) {
-        value = t.branch(value, !!bs.get_bit());
-        if (value < num_symbols) {
-            break;
-        }
-        value -= num_symbols;
+    bs.ensure_bits(t.table_bits());
+    auto te = t.next_from_bits(bs.peek_bits(t.table_bits()), t.table_bits());
+    bs.consume_bits(te.len);
+    int value = te.index;
+    while (value >= num_symbols) {
+        value = t.branch(value - num_symbols, !!bs.get_bit());
     }
     return value;
 }
@@ -601,7 +686,7 @@ std::vector<uint8_t> deflate(bit_stream& bs)
                     code_lengths[alphabet_permute[i]] = static_cast<uint8_t>(bs.get_bits(3));
                 }
 
-                huffman_tree cl_tree = make_huffman_tree(make_huffman_table(code_lengths, code_lengths+max_code_lengths));
+                huffman_tree cl_tree = make_huffman_tree(make_huffman_table(code_lengths, code_lengths+max_code_lengths), 7);
 
                 std::vector<uint8_t> cl2(hlit + hdist);
                 for (int i = 0; i < hlit + hdist;) {
@@ -639,8 +724,8 @@ std::vector<uint8_t> deflate(bit_stream& bs)
                     }
                 }
 
-                lit_len_tree = make_huffman_tree(make_huffman_table(cl2.data(), cl2.data() + hlit));
-                dist_tree    = make_huffman_tree(make_huffman_table(cl2.data() + hlit, cl2.data() + hlit + hdist));
+                lit_len_tree = make_huffman_tree(make_huffman_table(cl2.data(), cl2.data() + hlit), 9);
+                dist_tree    = make_huffman_tree(make_huffman_table(cl2.data() + hlit, cl2.data() + hlit + hdist), 6);
 
                 //static int n = 0;
                 //write_huff_tree("lit"+std::to_string(n)+".gv", lit_len_tree);
@@ -648,8 +733,8 @@ std::vector<uint8_t> deflate(bit_stream& bs)
                 //++n;
             } else {
                 assert(type == block_type::fixed_huffman);
-                lit_len_tree = make_huffman_tree(make_default_huffman_table());
-                dist_tree    = make_huffman_tree(make_default_huffman_len_table());
+                lit_len_tree = make_huffman_tree(make_default_huffman_table(), 9);
+                dist_tree    = make_huffman_tree(make_default_huffman_len_table(), 5);
             }
 
 
@@ -805,8 +890,8 @@ void write_huff_tree(const std::string& filename, const huffman_tree& tree) {
 
 void timing()
 {
-    // Before optimizations:
-    // Min/Avg/Mean/Max: 245.635 / 262.008 / 249.782 / 347.802
+    // Before optimizations: Min/Avg/Mean/Max: 245.635 / 262.008 / 249.782 / 347.802
+    // Use tables:           Min/Avg/Mean/Max: 166.918 / 171.466 / 169.422 / 199.329
     auto data = read_file("../bunny.tar.gz");
     constexpr int num_timings = 20;
     double timings[num_timings];
@@ -836,8 +921,8 @@ int main()
         test_huffman_tree();
         test_make_huffman_table();
         test_deflate();
-        //gunzip("../CMakeLists.txt.gz");
-        //gunzip("../main.cpp.gz");
+        gunzip("../CMakeLists.txt.gz");
+        gunzip("../main.cpp.gz");
         timing();
     } catch (const std::exception& e) {
         std::cerr << e.what() << "\n";
