@@ -895,23 +895,15 @@ std::vector<uint8_t> gunzip(const std::string& filename)
 #include <iostream>
 #include <iomanip>
 
-void write_huff_tree(const std::string& filename, const huffman_tree& tree) {
-    std::ofstream ofile(filename);
-    tree.output_graph(ofile);
-}
-
-void timing()
+template<typename F>
+void time_it(F f)
 {
-    // Before optimizations: Min/Avg/Mean/Max: 245.635 / 262.008 / 249.782 / 347.802
-    // Use tables:           Min/Avg/Mean/Max: 164.282 / 170.603 / 168.520 / 204.303
-    auto data = read_file("../bunny.tar.gz");
     constexpr int num_timings = 20;
     double timings[num_timings];
     double sum = 0.0;
     for (int i = 0; i < num_timings; ++i) {
         const auto start = std::chrono::high_resolution_clock::now();
-        bit_stream bs{data.data() + 20, data.data() + data.size() - 8};
-        deflate(bs);
+        f();
         const auto end = std::chrono::high_resolution_clock::now();
         timings[i] = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(end - start).count();
         std::cout << timings[i] << "\n";
@@ -923,6 +915,17 @@ void timing()
     std::cout << sum/num_timings << " / ";
     std::cout << timings[num_timings/2] << " / ";
     std::cout << timings[num_timings-1] << std::endl;
+}
+
+void timing()
+{
+    // Before optimizations         Min/Avg/Mean/Max: 245.635 / 262.008 / 249.782 / 347.802
+    // Use tables:                  Min/Avg/Mean/Max: 164.282 / 170.603 / 168.520 / 204.303
+    auto data = read_file("../bunny.tar.gz");
+    time_it([&data] {
+        bit_stream bs{data.data() + 20, data.data() + data.size() - 8};
+        deflate(bs);
+    });
 }
 
 int main()
