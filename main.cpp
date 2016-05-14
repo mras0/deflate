@@ -1,5 +1,6 @@
 #include <iostream>
 #include <iomanip>
+#include <string>
 #include <stdint.h>
 #include <cassert>
 
@@ -111,6 +112,23 @@ std::ostream& operator<<(std::ostream& os, const code& c) {
     return os;
 }
 
+std::string litrep(int value)
+{
+    std::string res;
+    value = static_cast<unsigned char>(value);
+    if (value >= 32 && value < 127) {
+        res += static_cast<char>(value);
+    }
+    else {
+        const char* hex = "0123456789abcdef";
+        res += '\\';
+        res += 'x';
+        res += hex[value>>4];
+        res += hex[value&15];
+    }
+    return res;
+}
+
 static constexpr int num_symbols = 288;
 static constexpr int max_bits    = 15;
 
@@ -178,10 +196,10 @@ public:
         for (int i = 0; i < num_nodes; ++i) {
             os << std::setw(3) << i << " ";
             if (nodes[i].left >= num_symbols) os << "*" << (nodes[i].left - num_symbols);
-            else os << (char)nodes[i].left;
+            else os << litrep(nodes[i].left);
             os << " ";
             if (nodes[i].right >= num_symbols) os << "*" << (nodes[i].right - num_symbols);
-            else os << (char)nodes[i].right;
+            else os << litrep(nodes[i].right);
             os << "\n";
         }
     }
@@ -302,14 +320,16 @@ std::ostream& operator<<(std::ostream& os, const std::vector<T>& v) {
     return os;
 }
 
-std::vector<code> make_huffman_table(const std::vector<uint8_t>& symbol_bit_lengths)
+std::vector<code> make_huffman_table(const uint8_t* symbol_bit_lengths, const uint8_t* symbol_bit_lengths_end)
 {
-    const auto max_bit_length = *std::max_element(begin(symbol_bit_lengths), end(symbol_bit_lengths));
+    const auto max_bit_length = *std::max_element(symbol_bit_lengths, symbol_bit_lengths_end);
     assert(max_bit_length <= max_bits);
     // Count the number of codes for each code length. Let bl_count[N] be the number of codes of length N, N >= 1.
     std::vector<int> bl_count(max_bit_length+1);
-    for (const auto& bl : symbol_bit_lengths) {
-        ++bl_count[bl];
+    for (auto bl = symbol_bit_lengths; bl != symbol_bit_lengths_end; ++bl) {
+        if (*bl > 0) {
+            ++bl_count[*bl];
+        }
     }
 
     //  Find the numerical value of the smallest code for each code length
@@ -325,7 +345,7 @@ std::vector<code> make_huffman_table(const std::vector<uint8_t>& symbol_bit_leng
     // values determined at step 2. Codes that are never used (which have a bit length of zero) must not be assigned
     // a value.
 
-    std::vector<::code> codes(symbol_bit_lengths.size());
+    std::vector<::code> codes(symbol_bit_lengths_end - symbol_bit_lengths);
     for (int n = 0; n < (int)codes.size(); n++) {
         const auto len = symbol_bit_lengths[n];//len = tree[n].Len;
         if (len != 0) {
@@ -335,6 +355,11 @@ std::vector<code> make_huffman_table(const std::vector<uint8_t>& symbol_bit_leng
         }
     }
     return codes;
+}
+
+std::vector<code> make_huffman_table(const std::vector<uint8_t>& symbol_bit_lengths)
+{
+    return make_huffman_table(symbol_bit_lengths.data(), symbol_bit_lengths.data() + symbol_bit_lengths.size());
 }
 
 auto make_default_huffman_table()
@@ -372,7 +397,9 @@ huffman_tree make_huffman_tree(const std::vector<code>& codes)
     assert(codes.size() <= num_symbols);
     huffman_tree t;
     for (int i = 0; i < (int)codes.size(); ++i) {
-        t.add(i, codes[i]);
+        if (codes[i].len > 0) {
+            t.add(i, codes[i]);
+        }
     }
     return t;
 }
@@ -467,13 +494,15 @@ std::vector<uint8_t> deflate(bit_stream& bs)
         1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
     };
 
+    auto invalid = [] () { assert(false); throw std::runtime_error("Invalid deflate stream"); };
+
     std::vector<uint8_t> output;
     bool last_block = false;
     while (!last_block) {
         // Block header bits
         last_block = !!bs.get_bit();
         const auto type  = static_cast<block_type>(bs.get_bits(2));
-        std::cout << "final " << last_block << " type " << type << std::endl;
+        //std::cout << "final " << last_block << " type " << type << std::endl;
         assert(type != block_type::reserved);
 
         if (type == block_type::uncompressed) {
@@ -487,8 +516,64 @@ std::vector<uint8_t> deflate(bit_stream& bs)
             huffman_tree dist_tree;
 
             if (type == block_type::dynamic_huffman) {
-                assert(false);
                 // read representation of code trees
+                const int hlit  = len_min + bs.get_bits(5); // 5 Bits: HLIT, # of Literal/Length codes - 257 (257 - 286)
+                const int hdist = 1 + bs.get_bits(5);       // 5 Bits: HDIST, # of Distance codes - 1        (1 - 32)
+                const int hclen = 4 + bs.get_bits(4);       // 4 Bits: HCLEN, # of Code Length codes - 4     (4 - 19)
+
+                //std::cout << "hlit  = " << hlit  << "\n";
+                //std::cout << "hdist = " << hdist << "\n";
+                //std::cout << "hclen = " << hclen << "\n";
+
+                constexpr int max_code_lengths = 19;
+                uint8_t code_lengths[max_code_lengths]={0};
+                for (int i = 0; i < hclen; ++i) {
+                    constexpr int alphabet_permute[max_code_lengths] = {
+                        16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15
+                    };
+                    code_lengths[alphabet_permute[i]] = static_cast<uint8_t>(bs.get_bits(3));
+                }
+
+                huffman_tree cl_tree = make_huffman_tree(make_huffman_table(code_lengths, code_lengths+max_code_lengths));
+
+                std::vector<uint8_t> cl2(hlit + hdist);
+                for (int i = 0; i < hlit + hdist;) {
+                    auto cl_val = static_cast<uint8_t>(decode(cl_tree, bs));
+                    int count = 1;
+                    if (cl_val <= max_bits) {
+                        // 0 - 15: Represent code lengths of 0 - 15
+                    } else if (cl_val == 16) {
+                        // 16: Copy the previous code length 3 - 6 times.
+                        if (i == 0) invalid();
+                        cl_val = cl2[i-1];
+                        // The next 2 bits indicate repeat length
+                        // (0 = 3, ... , 3 = 6)
+                        // Example:  Codes 8, 16 (+2 bits 11),
+                        // 16 (+2 bits 10) will expand to
+                        // 12 code lengths of 8 (1 + 6 + 5)
+                        count = 3 + bs.get_bits(2);
+                    } else if (cl_val == 17) {
+                        // 17: Repeat a code length of 0 for 3 - 10 times.
+                        // (3 bits of length)
+                        cl_val = 0;
+                        count = 3 + bs.get_bits(3);
+                    } else {
+                        // 18: Repeat a code length of 0 for 11 - 138 times
+                        // (7 bits of length)
+                        assert(cl_val == 18);
+                        cl_val = 0;
+                        count = 11 + bs.get_bits(7);
+                    }
+                    assert(cl_val <= max_bits);
+                    if (count + i > cl2.size()) invalid();
+                    while (count--) {
+                        //std::cout << (i > hlit ? "dist" : "lit") <<  "[" << (i > hlit ? i - hlit : i) << "] = " << (int)cl_val << std::endl;
+                        cl2[i++] = cl_val;
+                    }
+                }
+
+                lit_len_tree = make_huffman_tree(make_huffman_table(cl2.data(), cl2.data() + hlit));
+                dist_tree    = make_huffman_tree(make_huffman_table(cl2.data() + hlit, cl2.data() + hlit + hdist));
             } else {
                 assert(type == block_type::fixed_huffman);
                 lit_len_tree = make_huffman_tree(make_default_huffman_table());
@@ -503,12 +588,7 @@ std::vector<uint8_t> deflate(bit_stream& bs)
                     // if value < 256
                     //    copy value (literal byte) to output stream
                     output.push_back(static_cast<uint8_t>(value));
-                    std::cout << "Lit ";
-                    if (value >= 32 && value < 127)
-                        std::cout << (char)value;
-                    else
-                        std::cout << value;
-                    std::cout << "\n";
+                    //std::cout << "Lit " << litrep(value) << "\n";
                 } else if (value == end_of_block) {
                     // if value = end of block (256)
                     //    break from loop
@@ -521,18 +601,26 @@ std::vector<uint8_t> deflate(bit_stream& bs)
                     //    stream, and copy length bytes from this
                     //    position to the output stream.
                     const auto eb = extra_bits[value - len_min];
-                    assert(eb == 0);
-                    const auto len = lengths[value - len_min];
+                    int len = lengths[value - len_min];
+                    if (eb) {
+                        len += bs.get_bits(eb);
+                    }
 
                     int dist = decode(dist_tree, bs);
-                    const auto dist_bytes = distance_length[dist] + bs.get_bits(distance_extra_bits[dist]);
+                    const int dist_extra_bits = distance_extra_bits[dist];
+                    int dist_bytes = distance_length[dist];
+                    if (dist_extra_bits) {
+                        dist_bytes += bs.get_bits(dist_extra_bits);
+                    }
 
-                    std::cout << "<" << len << ", " << dist_bytes << ">" << std::endl;
-                    assert(dist_bytes <= output.size());
+                    //std::cout << "<" << len << ", " << dist_bytes << ">" << std::endl;
+                    if (dist_bytes > output.size()) invalid();
                     auto src = output.size() - dist_bytes;
                     for (int i = 0; i < len; ++i) {
+                        //std::cout << litrep(output[src]);
                         output.push_back(output[src++]);
                     }
+                    //std::cout << "\n";
                 }
             }
         }
@@ -552,7 +640,6 @@ void test_deflate()
 }
 
 #include <fstream>
-#include <string>
 void gunzip(const std::string& filename)
 {
     std::ifstream in(filename, std::ios_base::binary);
@@ -617,17 +704,25 @@ void gunzip(const std::string& filename)
 
     bit_stream bs(input.data() + pos, input.data() + file_size - 8);
     const auto output = deflate(bs);
+    if (output.size() != isize) {
+        invalid();
+    }
     std::cout.write(reinterpret_cast<const char*>(output.data()), output.size());
 
     std::cout << "CRC32 " << std::hex << crc32 << std::dec << "\n";
-    std::cout << "ISIZE " << isize << "\n";
 }
 
 int main()
 {
-    test_bit_stream();
-    test_huffman_tree();
-    test_make_huffman_table();
-    test_deflate();
-    gunzip("../main.cpp.gz");
+    try {
+        test_bit_stream();
+        test_huffman_tree();
+        test_make_huffman_table();
+        test_deflate();
+        gunzip("../CMakeLists.txt.gz");
+        gunzip("../main.cpp.gz");
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << "\n";
+        return 1;
+    }
 }
