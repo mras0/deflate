@@ -115,6 +115,16 @@ public:
     explicit huffman_tree() {
     }
 
+    int& branch(int index, bool right) {
+        assert(index < num_nodes);
+        auto& n = nodes[index];
+        return right ? n.right : n.left;
+    }
+
+    const int& branch(int index, bool right) const {
+        return const_cast<huffman_tree&>(*this).branch(index, right);
+    }
+
     void add(int symbol, const code& symbol_code) {
         assert(symbol_code.valid());
         auto c = symbol_code;
@@ -183,15 +193,6 @@ private:
 
     int num_nodes = 0;
     node nodes[max_nodes];
-
-    int& branch(int index, bool right) {
-        assert(index < num_nodes);
-        auto& n = nodes[index];
-        return right ? n.right : n.left;
-    }
-    const int& branch(int index, bool right) const {
-        return const_cast<huffman_tree&>(*this).branch(index, right);
-    }
 
     int alloc_node() {
         assert(num_nodes < max_nodes);
@@ -354,6 +355,23 @@ auto make_default_huffman_table()
     return make_huffman_table(sbl);
 }
 
+auto make_default_huffman_len_table()
+{
+    // Distance codes 0-31 are represented by (fixed-length) 5-bit codes
+    std::vector<uint8_t> length_bit_lengths(32, 5);
+    return make_huffman_table(length_bit_lengths);
+}
+
+huffman_tree make_huffman_tree(const std::vector<code>& codes)
+{
+    assert(codes.size() <= num_symbols);
+    huffman_tree t;
+    for (int i = 0; i < (int)codes.size(); ++i) {
+        t.add(i, codes[i]);
+    }
+    return t;
+}
+
 void test_make_huffman_table()
 {
     // Example from rfc1951 3.2.2
@@ -404,7 +422,20 @@ std::ostream& operator<<(std::ostream& os, block_type t) {
     return os << "block_type{" << static_cast<int>(t) << "}";
 }
 
-void deflate(bit_stream& bs)
+int decode(const huffman_tree& t, bit_stream& bs)
+{
+    int value = 0;
+    for (;;) {
+        value = t.branch(value, !!bs.get_bit());
+        if (value < num_symbols) {
+            break;
+        }
+        value -= num_symbols;
+    }
+    return value;
+}
+
+std::vector<uint8_t> deflate(bit_stream& bs)
 {
     constexpr int min_match_distance_bytes          = 1;
     constexpr int max_match_distance_bytes          = 32768;
@@ -417,7 +448,21 @@ void deflate(bit_stream& bs)
         len_min      = 257,
         len_max      = 285,
     };
+    constexpr int extra_bits[1+len_max - len_min] = {
+        0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0,
+    };
+    constexpr int lengths[1+len_max-len_min] = {
+        3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258,
+    };
 
+    constexpr int distance_extra_bits[32] = {
+        0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13,
+    };
+    constexpr int distance_length[32] = {
+        1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
+    };
+
+    std::vector<uint8_t> output;
     bool last_block = false;
     while (!last_block) {
         // Block header bits
@@ -433,32 +478,61 @@ void deflate(bit_stream& bs)
             //     read LEN and NLEN (each 16-bits)
             //     copy LEN bytes of data to output
         } else {
+            huffman_tree lit_len_tree;
+            huffman_tree dist_tree;
+
             if (type == block_type::dynamic_huffman) {
                 assert(false);
                 // read representation of code trees
+            } else {
+                assert(type == block_type::fixed_huffman);
+                lit_len_tree = make_huffman_tree(make_default_huffman_table());
+                dist_tree    = make_huffman_tree(make_default_huffman_len_table());
             }
 
-            bool end_of_block = false;
-            while (!end_of_block) {
+
+            for (;;) {
                 // decode literal/length value from input stream
-                for (int i = 0; i < 9; ++i) std::cout << (int)bs.get_bit();
-                std::cout << std::endl;
-                
-                assert(false);
-                // if value < 256
-                //    copy value (literal byte) to output stream
-                // otherwise
-                //    if value = end of block (256)
-                //       break from loop
-                //    otherwise (value = 257..285)
-                //       decode distance from input stream
-                // 
-                //       move backwards distance bytes in the output
-                //       stream, and copy length bytes from this
-                //       position to the output stream.
+                const int value = decode(lit_len_tree, bs);
+                if (value <= lit_max) {
+                    // if value < 256
+                    //    copy value (literal byte) to output stream
+                    output.push_back(static_cast<uint8_t>(value));
+                    std::cout << "Lit ";
+                    if (value >= 32 && value < 127)
+                        std::cout << (char)value;
+                    else
+                        std::cout << value;
+                    std::cout << "\n";
+                } else if (value == end_of_block) {
+                    // if value = end of block (256)
+                    //    break from loop
+                    break;
+                } else {
+                    // otherwise (value = 257..285)
+                    //    decode distance from input stream
+                    //
+                    //    move backwards distance bytes in the output
+                    //    stream, and copy length bytes from this
+                    //    position to the output stream.
+                    const auto eb = extra_bits[value - len_min];
+                    assert(eb == 0);
+                    const auto len = lengths[value - len_min];
+
+                    int dist = decode(dist_tree, bs);
+                    const auto dist_bytes = distance_length[dist] + bs.get_bits(distance_extra_bits[dist]);
+
+                    std::cout << "<" << len << ", " << dist_bytes << ">" << std::endl;
+                    assert(dist_bytes <= output.size());
+                    auto src = output.size() - dist_bytes;
+                    for (int i = 0; i < len; ++i) {
+                        output.push_back(output[src++]);
+                    }
+                }
             }
         }
     }
+    return output;
 }
 
 int main()
@@ -468,7 +542,9 @@ int main()
     test_make_huffman_table();
     const uint8_t deflate_input1[13] = {0xf3, 0xc9, 0xcc, 0x4b, 0x55, 0x30, 0xe4, 0xf2, 0x01, 0x51, 0x46, 0x5c, 0x00};
     const uint8_t deflate_input2[12] = {0xf3, 0xc9, 0xcc, 0x4b, 0x55, 0x30, 0xe4, 0x02, 0x53, 0x46, 0x5c, 0x00};
-    const uint8_t expected_output[14] = { 'L', 'i', 'n', 'e', ' ', '1', '\n', 'L', 'i', 'n', 'e', ' ', '2', '\n'};
-    bit_stream bs{deflate_input1};
-    //deflate(bs);
+    const std::vector<uint8_t> expected_output{ 'L', 'i', 'n', 'e', ' ', '1', '\n', 'L', 'i', 'n', 'e', ' ', '2', '\n'};
+    bit_stream bs1{deflate_input1};
+    assert(deflate(bs1) == expected_output);
+    bit_stream bs2{deflate_input2};
+    assert(deflate(bs2) == expected_output);
 }
