@@ -3,6 +3,7 @@
 #include "huffman_table.h"
 
 #include <stdexcept>
+#include <string.h>
 
 namespace deflate {
 
@@ -21,6 +22,21 @@ int decode(const huffman_tree& t, bit_stream& bs)
         value = t.branch(value - huffman_tree::max_symbols, !!bs.get_bit());
     }
     return value;
+}
+
+void copy_match(uint8_t* buffer, int destination, int distance, int length)
+{
+    assert(distance <= destination);
+    assert(length >= 3);
+    uint8_t* out = buffer + destination;
+    const uint8_t* in = buffer + destination - distance;
+    if (distance >= length) {
+        memcpy(out, in, length);
+    } else {
+        do {
+            *out++ = *in++;
+        } while (--length);
+    }
 }
 
 std::vector<uint8_t> deflate(bit_stream& bs)
@@ -174,13 +190,12 @@ std::vector<uint8_t> deflate(bit_stream& bs)
                     }
 
                     //std::cout << "<" << len << ", " << dist_bytes << ">" << std::endl;
-                    if (static_cast<size_t>(dist_bytes) > output.size()) invalid();
                     const int old_size = static_cast<int>(output.size());
-                    const int src = old_size - dist_bytes;
-                    output.resize(old_size + len);
-                    for (int i = 0; i < len; ++i) {
-                        output[old_size+i] = output[src+i];
+                    if (dist_bytes > old_size) {
+                        invalid();
                     }
+                    output.resize(old_size + len);
+                    copy_match(&output[0], old_size, dist_bytes, len);
                 }
             }
         }
