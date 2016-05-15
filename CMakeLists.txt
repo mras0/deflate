@@ -12,7 +12,7 @@ if (MSVC)
     set(CMAKE_CXX_FLAGS "${MSVC_FLAGS_COMMON} /EHsc")
 
     set(MSVC_FLAGS_DEBUG   "/MTd /Od /D_DEBUG")
-    set(MSVC_FLAGS_RELEASE "/MT /O2 /DNDEBUG")
+    set(MSVC_FLAGS_RELEASE "/MT /Ox /Ob2 /Oi /Ot /DNDEBUG /FAs")
 
     set(CMAKE_C_FLAGS_DEBUG     "${MSVC_FLAGS_DEBUG}")
     set(CMAKE_C_FLAGS_RELEASE   "${MSVC_FLAGS_RELEASE}")
@@ -42,4 +42,12 @@ endif()
 enable_testing()
 add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --force-new-ctest-process --output-on-failure --build-config "$<CONFIGURATION>")
 
+add_subdirectory(src)
+include_directories(src)
+
+add_executable(core_tests core_tests.cpp)
+target_link_libraries(core_tests deflate_core)
+add_test(core_tests core_tests)
+
 add_executable(deflate main.cpp)
+target_link_libraries(deflate deflate_core)

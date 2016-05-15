@@ -1,0 +1,14 @@
+add_library(deflate_core
+    bit_stream.cpp
+    bit_stream.h
+    crc.cpp
+    crc.h
+    deflate.cpp
+    deflate.h
+    huffman_code.cpp
+    huffman_code.h
+    huffman_table.cpp
+    huffman_table.h
+    huffman_tree.cpp
+    huffman_tree.h
+    )
