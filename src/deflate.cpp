@@ -71,7 +71,7 @@ public:
     }
 
     void enlarge() {
-        buffer_.resize(buffer_.size() + 32768);
+        buffer_.resize(buffer_.size() < 32768 ? 32768 : buffer_.size() * 2);
     }
 
     auto steal_buffer() {
