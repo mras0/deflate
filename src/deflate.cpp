@@ -4,6 +4,8 @@
 
 #include <stdexcept>
 #include <string.h>
+#include <stdlib.h>
+#include <memory>
 
 namespace deflate {
 
@@ -34,10 +36,10 @@ public:
     }
 
     void copy_match(int distance, int length) {
-        assert(distance <= destination);
+        assert(distance <= used_);
         assert(distance < 32768);
         assert(length >= 3 && length <= max_match_length);
-        uint8_t* out = ptr() + used_;
+        uint8_t* out = buffer_.get() + used_;
         const uint8_t* in = out - distance;
         used_ += length;
         if (distance >= length) {
@@ -49,11 +51,6 @@ public:
         }
     }
 
-    void add_used(int used) {
-        assert(used <= avail());
-        used_ += used;
-    }
-
     int used() const {
         return used_;
     }
@@ -63,25 +60,38 @@ public:
     }
 
     int capacity() const {
-        return static_cast<int>(buffer_.size());
-    }
-
-    uint8_t* ptr() {
-        return &buffer_[0];
+        return capacity_;
     }
 
     void enlarge() {
-        buffer_.resize(buffer_.size() < 32768 ? 32768 : buffer_.size() * 2);
+        if (!capacity_) {
+            capacity_ = 32768;
+            buffer_.reset(static_cast<uint8_t*>(malloc(capacity_)));
+            if (!buffer_) throw std::bad_alloc{};
+            return;
+        }
+        const auto new_capacity = 2 * capacity_;
+        buf_ptr new_buffer(static_cast<uint8_t*>(realloc(buffer_.get(), new_capacity)));
+        if (!new_buffer) throw std::bad_alloc{};
+        buffer_.release(); // buffer is now dangling, release it
+        buffer_ = std::move(new_buffer);
+        capacity_ = new_capacity;
     }
 
-    auto steal_buffer() {
-        buffer_.resize(used());
-        return std::move(buffer_);
+    auto finish() {
+        return std::vector<uint8_t>{buffer_.get(), buffer_.get() + used_};
     }
 
 private:
-    std::vector<uint8_t> buffer_;
-    int                  used_ = 0;
+    struct free_deleter {
+        void operator()(void* ptr) { free(ptr); }
+    };
+
+    using buf_ptr = std::unique_ptr<uint8_t[], free_deleter>;
+
+    buf_ptr buffer_;
+    int     used_ = 0;
+    int     capacity_ = 0;
 };
 
 bool deflate_inner(output_buffer& output, bit_stream& bs, const huffman_tree& lit_len_tree, const huffman_tree& dist_tree)
@@ -256,7 +266,7 @@ std::vector<uint8_t> deflate(bit_stream& bs)
             invalid();
         }
     }
-    return output.steal_buffer();
+    return output.finish();
 }
 
 } // namespace deflate

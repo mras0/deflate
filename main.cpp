@@ -128,6 +128,7 @@ void timing()
     // Add output_buffer to reduce reallocations            Min/Avg/Mean/Max: 126.260 / 130.980 / 128.099 / 166.442
     // Make copy_match a member function of output_buffer   Min/Avg/Mean/Max: 125.058 / 128.883 / 126.667 / 149.527
     // Double buffer on enlarge() call                      Min/Avg/Mean/Max: 120.193 / 123.590 / 121.619 / 145.353
+    // Use realloc()                                        Min/Avg/Mean/Max: 116.515 / 121.193 / 118.694 / 145.324
     auto data = read_file("../bunny.tar.gz");
     time_it([&data] {
         bit_stream bs{data.data() + 20, data.data() + data.size() - 8};
