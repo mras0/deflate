@@ -2,6 +2,8 @@
 #include "huffman_tree.h"
 #include "huffman_table.h"
 
+#include <stdexcept>
+
 namespace deflate {
 
 enum class block_type { uncompressed, fixed_huffman, dynamic_huffman, reserved };
@@ -45,6 +47,9 @@ std::vector<uint8_t> deflate(bit_stream& bs)
     };
 
     auto invalid = [] () { assert(false); throw std::runtime_error("Invalid deflate stream"); };
+
+    static const auto default_lit_len_tree = make_huffman_tree(make_default_huffman_table(), 9);
+    static const auto default_dist_tree    = make_huffman_tree(make_default_huffman_len_table(), 5);
 
     std::vector<uint8_t> output;
     bool last_block = false;
@@ -131,8 +136,8 @@ std::vector<uint8_t> deflate(bit_stream& bs)
                 //++n;
             } else {
                 assert(type == block_type::fixed_huffman);
-                lit_len_tree = make_huffman_tree(make_default_huffman_table(), 9);
-                dist_tree    = make_huffman_tree(make_default_huffman_len_table(), 5);
+                lit_len_tree = default_lit_len_tree;
+                dist_tree    = default_dist_tree;
             }
 
 
@@ -170,12 +175,12 @@ std::vector<uint8_t> deflate(bit_stream& bs)
 
                     //std::cout << "<" << len << ", " << dist_bytes << ">" << std::endl;
                     if (static_cast<size_t>(dist_bytes) > output.size()) invalid();
-                    auto src = output.size() - dist_bytes;
+                    const int old_size = static_cast<int>(output.size());
+                    const int src = old_size - dist_bytes;
+                    output.resize(old_size + len);
                     for (int i = 0; i < len; ++i) {
-                        //std::cout << litrep(output[src]);
-                        output.push_back(output[src+i]);
+                        output[old_size+i] = output[src+i];
                     }
-                    //std::cout << "\n";
                 }
             }
         }

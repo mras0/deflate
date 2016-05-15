@@ -3,6 +3,7 @@
 #include <iostream>
 #include <iomanip>
 #include <algorithm>
+#include <stdexcept>
 
 #include "deflate.h"
 #include "crc.h"
@@ -116,8 +117,9 @@ void time_it(F f)
 
 void timing()
 {
-    // Before optimizations         Min/Avg/Mean/Max: 245.635 / 262.008 / 249.782 / 347.802
-    // Use tables:                  Min/Avg/Mean/Max: 164.282 / 170.603 / 168.520 / 204.303
+    // Before optimizations                             Min/Avg/Mean/Max: 245.635 / 262.008 / 249.782 / 347.802
+    // Use tables:                                      Min/Avg/Mean/Max: 164.282 / 170.603 / 168.520 / 204.303
+    // Remember tables, resize before main deflate loop Min/Avg/Mean/Max: 146.035 / 151.077 / 149.078 / 181.598
     auto data = read_file("../bunny.tar.gz");
     time_it([&data] {
         bit_stream bs{data.data() + 20, data.data() + data.size() - 8};
