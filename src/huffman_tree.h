@@ -20,18 +20,18 @@ public:
     // branch return value meaning:
     //  0..max_symbols-1 symbol
     //  max_symbols..    internal node (next index = return value - max_symbols)
-    int& branch(int index, bool right) {
+    uint16_t& branch(int index, bool right) {
         assert(index < num_nodes);
         auto& n = nodes[index];
         return right ? n.right : n.left;
     }
 
-    const int& branch(int index, bool right) const {
+    const uint16_t& branch(int index, bool right) const {
         return const_cast<huffman_tree&>(*this).branch(index, right);
     }
 
     void add(int symbol, const huffman_code& symbol_code) {
-        assert(symbol < max_symbols);
+        assert(symbol >= 0 && symbol < max_symbols);
         assert(symbol_code.valid());
         assert(symbol_code.len <= max_bits);
         auto c = symbol_code;
@@ -52,7 +52,7 @@ public:
         }
         auto& edge = branch(index, consume_bit(c));
         assert(edge == invalid_edge_value);
-        edge = symbol;
+        edge = static_cast<uint16_t>(symbol);
     }
 
     int symbol(const huffman_code& symbol_code) const {
@@ -79,15 +79,29 @@ public:
 
     void output_graph(std::ostream& os) const;
 
-    struct table_entry {
-        int len;
-        int index;
+    class table_entry {
+    public:
+        explicit table_entry() : repr_(0) {
+        }        
+        explicit table_entry(int len, int code) : repr_(static_cast<uint16_t>((len<<12)|code)) {
+            assert(len > 0 && len <= max_bits);
+            assert((code >> len) == 0);
+        }
+        explicit table_entry(uint16_t repr) : repr_(repr) {
+        }
+        uint8_t  len() const { return static_cast<uint8_t>(repr_ >> 12); }
+        uint16_t index() const { return static_cast<uint16_t>(repr_ & 0xfff); }
+
+        bool operator==(const table_entry& rhs) const { return repr_ == rhs.repr_; }
+
+    private:
+        uint16_t repr_;
     };
 
     table_entry next_from_bits(uint32_t bits, int num_bits) const {
         assert(!table.empty());
         assert(num_bits >= table_bits()); (void)num_bits;
-        return table[bits & ((1 << table_bits_) -1)];
+        return table_entry { table[bits & ((1 << table_bits_) -1)] };
     }
 
     int table_bits() const {
@@ -95,59 +109,50 @@ public:
     }
 
     void make_tables(int num_table_bits) {
-        assert(num_table_bits > 0);
+        assert(num_table_bits > 0 && num_table_bits <= max_table_bits);
         assert(num_nodes > 0);
         const int table_size = 1 << num_table_bits;
-        table.resize(table_size);
         table_bits_ = num_table_bits;
         for (int i = 0; i < table_size; ++i) {
-            table[i].index = max_symbols;
-            table[i].len = 0;
+            int index = max_symbols;
+            int len = 0;
             int val = i;
-            while (table[i].len < table_bits_ && table[i].index >= max_symbols) {
-                ++table[i].len;
-                table[i].index = branch(table[i].index - max_symbols, val&0x01);
+            while (len < table_bits_ && index >= max_symbols) {
+                ++len;
+                index = branch(index - max_symbols, val & 1);
                 val >>= 1;
             }
-#if 0
-            for (int b=table_bits-1; b>=0; b--) std::cout << ((i>>b)&1);
-            if (table[i].index >= max_symbols)
-                std::cout << " " << table[i].index-max_symbols;
-            else
-                std::cout << " " << (char)table[i].index;
-            std::cout << " len = " << table[i].len << "\n";
-#endif
+            table[i] = table_entry{len, index};
         }
     }
-
-
 
 private:
     static constexpr int max_nodes          = max_symbols;
     static constexpr int invalid_edge_value = max_symbols + max_nodes;
+    static constexpr int max_table_bits     = 9;
 
     struct node {
-        int left;
-        int right;
+        uint16_t left;
+        uint16_t right;
     };
 
     int num_nodes = 0;
     node nodes[max_nodes];
 
     int table_bits_ = 0;
-    std::vector<table_entry> table;
+    table_entry table[1<<max_table_bits];
 
-    int alloc_node() {
+    uint16_t alloc_node() {
         assert(num_nodes < max_nodes);
         nodes[num_nodes].left  = invalid_edge_value;
         nodes[num_nodes].right = invalid_edge_value;
-        return (num_nodes++) + max_symbols;
+        return static_cast<uint16_t>((num_nodes++) + max_symbols);
     }
 
     static huffman_code bit_added(const huffman_code& c, uint8_t bit) {
-        assert(c.len < UINT8_MAX - 1);
+        assert(c.len <= max_bits);
         assert(bit == 0 || bit == 1);
-        return { static_cast<uint8_t>(c.len + 1), (c.value << 1) | static_cast<uint32_t>(bit) };
+        return { static_cast<uint8_t>(c.len + 1), static_cast<uint16_t>((c.value << 1) | bit) };
     }
 
     static bool consume_bit(huffman_code& c) {
@@ -189,11 +194,6 @@ private:
         return false;
     }
 };
-
-inline bool operator==(const huffman_tree::table_entry& l, const huffman_tree::table_entry& r)
-{
-    return l.len == r.len && l.index == r.index;
-}
 
 huffman_tree make_huffman_tree(const std::vector<huffman_code>& codes, int table_bits);
 

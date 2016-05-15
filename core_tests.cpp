@@ -74,7 +74,7 @@ std::ostream& operator<<(std::ostream& os, const huffman_code& c) {
 
 void test_huffman_tree()
 {
-    auto te = [] (int len, int index) { return huffman_tree::table_entry{len, index}; };
+    auto te = [] (int len, int index) { return huffman_tree::table_entry{static_cast<uint8_t>(len), static_cast<uint16_t>(index)}; };
     {
         constexpr huffman_code a_code{ 2, 0b00  };
         constexpr huffman_code b_code{ 1, 0b1   };
@@ -120,10 +120,10 @@ void test_huffman_tree()
         t.make_tables(2);
         CHECK(t.next_from_bits(0b01, 2) == te(2, 'A'));
         CHECK(t.next_from_bits(0b00, 2) == te(1, 'B'));
-        CHECK(t.next_from_bits(0b11, 2).len == 2);
-        CHECK(t.next_from_bits(0b11, 2).index >= huffman_tree::max_symbols);
-        CHECK(t.branch(t.next_from_bits(0b11, 2).index-huffman_tree::max_symbols, false) == 'C');
-        CHECK(t.branch(t.next_from_bits(0b11, 2).index-huffman_tree::max_symbols, true) == 'D');
+        CHECK(t.next_from_bits(0b11, 2).len() == 2);
+        CHECK(t.next_from_bits(0b11, 2).index() >= huffman_tree::max_symbols);
+        CHECK(t.branch(t.next_from_bits(0b11, 2).index()-huffman_tree::max_symbols, false) == 'C');
+        CHECK(t.branch(t.next_from_bits(0b11, 2).index()-huffman_tree::max_symbols, true) == 'D');
     }
 }
 
@@ -156,11 +156,11 @@ void test_make_huffman_table()
     auto cs = make_default_huffman_table();
     for (int i = 0; i < huffman_tree::max_symbols; ++i) {
         auto expected = [i]() {
-            if (i < 144) return huffman_code{8, static_cast<uint32_t>(0b00110000  + (i - 0))};
-            if (i < 256) return huffman_code{9, static_cast<uint32_t>(0b110010000 + (i - 144))};
-            if (i < 280) return huffman_code{7, static_cast<uint32_t>(0b0000000   + (i - 256))};
+            if (i < 144) return huffman_code{8, static_cast<uint16_t>(0b00110000  + (i - 0))};
+            if (i < 256) return huffman_code{9, static_cast<uint16_t>(0b110010000 + (i - 144))};
+            if (i < 280) return huffman_code{7, static_cast<uint16_t>(0b0000000   + (i - 256))};
             assert(i < huffman_tree::max_symbols);
-            return huffman_code{8, static_cast<uint32_t>(0b11000000  + (i - 280))};
+            return huffman_code{8, static_cast<uint16_t>(0b11000000  + (i - 280))};
         }();
         CHECK(cs[i] == expected);
     }

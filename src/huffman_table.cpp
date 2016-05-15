@@ -17,11 +17,11 @@ huffman_table make_huffman_table(const uint8_t* symbol_bit_lengths, const uint8_
     }
 
     //  Find the numerical value of the smallest code for each code length
-    int code = 0;
+    uint16_t code = 0;
     assert(bl_count[0] == 0);
-    std::vector<uint32_t> next_code(max_bit_length+1);
+    std::vector<uint16_t> next_code(max_bit_length+1);
     for (int bits = 1; bits <= max_bit_length; bits++) {
-        code = (code + bl_count[bits-1]) << 1;
+        code = static_cast<uint16_t>((code + bl_count[bits-1]) << 1);
         next_code[bits] = code;
     }
 

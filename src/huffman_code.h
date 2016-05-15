@@ -9,7 +9,7 @@ static constexpr int max_bits = 15;
 
 struct huffman_code {
     uint8_t  len;
-    uint32_t value;
+    uint16_t value;
 
     bool valid() const {
         return len > 0 && len <= max_bits && len <= 8 * sizeof(value) && (value >> len) == 0;

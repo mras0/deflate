@@ -124,6 +124,7 @@ void timing()
     // Remember tables, resize before main deflate loop Min/Avg/Mean/Max: 146.035 / 151.077 / 149.078 / 181.598
     // Rrwrite copy_match to use pointers               Min/Avg/Mean/Max: 144.599 / 149.110 / 146.850 / 178.669
     // Use memcpy in copy_match when possible           Min/Avg/Mean/Max: 140.990 / 145.125 / 143.224 / 166.766
+    // Refactor to reduce memory usage/copying          Min/Avg/Mean/Max: 139.712 / 144.123 / 142.551 / 169.340
     auto data = read_file("../bunny.tar.gz");
     time_it([&data] {
         bit_stream bs{data.data() + 20, data.data() + data.size() - 8};
