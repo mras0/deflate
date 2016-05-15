@@ -119,13 +119,14 @@ void timing()
 {
     // Tests performned on bunny.tar.gz (4.894.286 B) and doing 2 "warp up" runs before sampling
     //
-    // Before optimizations                             Min/Avg/Mean/Max: 245.635 / 262.008 / 249.782 / 347.802
-    // Use tables:                                      Min/Avg/Mean/Max: 164.282 / 170.603 / 168.520 / 204.303
-    // Remember tables, resize before main deflate loop Min/Avg/Mean/Max: 146.035 / 151.077 / 149.078 / 181.598
-    // Rrwrite copy_match to use pointers               Min/Avg/Mean/Max: 144.599 / 149.110 / 146.850 / 178.669
-    // Use memcpy in copy_match when possible           Min/Avg/Mean/Max: 140.990 / 145.125 / 143.224 / 166.766
-    // Refactor to reduce memory usage/copying          Min/Avg/Mean/Max: 139.712 / 144.123 / 142.551 / 169.340
-    // Add output_buffer to reduce reallocations        Min/Avg/Mean/Max: 126.260 / 130.980 / 128.099 / 166.442
+    // Before optimizations                                 Min/Avg/Mean/Max: 245.635 / 262.008 / 249.782 / 347.802
+    // Use tables:                                          Min/Avg/Mean/Max: 164.282 / 170.603 / 168.520 / 204.303
+    // Remember tables, resize before main deflate loop     Min/Avg/Mean/Max: 146.035 / 151.077 / 149.078 / 181.598
+    // Rrwrite copy_match to use pointers                   Min/Avg/Mean/Max: 144.599 / 149.110 / 146.850 / 178.669
+    // Use memcpy in copy_match when possible               Min/Avg/Mean/Max: 140.990 / 145.125 / 143.224 / 166.766
+    // Refactor to reduce memory usage/copying              Min/Avg/Mean/Max: 139.712 / 144.123 / 142.551 / 169.340
+    // Add output_buffer to reduce reallocations            Min/Avg/Mean/Max: 126.260 / 130.980 / 128.099 / 166.442
+    // Make copy_match a member function of output_buffer   Min/Avg/Mean/Max: 125.058 / 128.883 / 126.667 / 149.527
     auto data = read_file("../bunny.tar.gz");
     time_it([&data] {
         bit_stream bs{data.data() + 20, data.data() + data.size() - 8};

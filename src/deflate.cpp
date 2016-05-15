@@ -26,27 +26,27 @@ int decode(const huffman_tree& t, bit_stream& bs)
     return value;
 }
 
-void copy_match(uint8_t* buffer, int destination, int distance, int length)
-{
-    assert(distance <= destination);
-    assert(distance < 32768);
-    assert(length >= 3 && length <= max_match_length);
-    uint8_t* out = buffer + destination;
-    const uint8_t* in = buffer + destination - distance;
-    if (distance >= length) {
-        memcpy(out, in, length);
-    } else {
-        do {
-            *out++ = *in++;
-        } while (--length);
-    }
-}
-
 class output_buffer {
 public:
     void put(uint8_t c) {
         assert(used() < capacity());
         buffer_[used_++] = c;
+    }
+
+    void copy_match(int distance, int length) {
+        assert(distance <= destination);
+        assert(distance < 32768);
+        assert(length >= 3 && length <= max_match_length);
+        uint8_t* out = ptr() + used_;
+        const uint8_t* in = out - distance;
+        used_ += length;
+        if (distance >= length) {
+            memcpy(out, in, length);
+        } else {
+            do {
+                *out++ = *in++;
+            } while (--length);
+        }
     }
 
     void add_used(int used) {
@@ -143,13 +143,10 @@ bool deflate_inner(output_buffer& output, bit_stream& bs, const huffman_tree& li
                 dist_bytes += bs.get_bits(dist_extra_bits);
             }
 
-            //std::cout << "<" << len << ", " << dist_bytes << ">" << std::endl;
-            const int old_size = output.used();
-            if (dist_bytes > old_size) {
+            if (dist_bytes > output.used()) {
                 return false;
             }
-            copy_match(output.ptr(), old_size, dist_bytes, len);
-            output.add_used(len);
+            output.copy_match(dist_bytes, len);
         }
     }
 }
