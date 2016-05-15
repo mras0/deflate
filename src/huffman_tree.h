@@ -83,9 +83,9 @@ public:
     public:
         explicit table_entry() : repr_(0) {
         }        
-        explicit table_entry(int len, int code) : repr_(static_cast<uint16_t>((len<<12)|code)) {
+        explicit table_entry(int len, int index) : repr_(static_cast<uint16_t>((len<<12)|index)) {
             assert(len > 0 && len <= max_bits);
-            assert((code >> len) == 0);
+            assert(index < invalid_edge_value);
         }
         explicit table_entry(uint16_t repr) : repr_(repr) {
         }
@@ -99,7 +99,7 @@ public:
     };
 
     table_entry next_from_bits(uint32_t bits, int num_bits) const {
-        assert(!table.empty());
+        assert(table_bits());
         assert(num_bits >= table_bits()); (void)num_bits;
         return table_entry { table[bits & ((1 << table_bits_) -1)] };
     }

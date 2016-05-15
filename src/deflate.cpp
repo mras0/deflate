@@ -9,6 +9,8 @@ namespace deflate {
 
 enum class block_type { uncompressed, fixed_huffman, dynamic_huffman, reserved };
 
+constexpr int max_match_length = 258;
+
 int decode(const huffman_tree& t, bit_stream& bs)
 {
     int value = huffman_tree::max_symbols;
@@ -27,7 +29,8 @@ int decode(const huffman_tree& t, bit_stream& bs)
 void copy_match(uint8_t* buffer, int destination, int distance, int length)
 {
     assert(distance <= destination);
-    assert(length >= 3);
+    assert(distance < 32768);
+    assert(length >= 3 && length <= max_match_length);
     uint8_t* out = buffer + destination;
     const uint8_t* in = buffer + destination - distance;
     if (distance >= length) {
@@ -39,7 +42,49 @@ void copy_match(uint8_t* buffer, int destination, int distance, int length)
     }
 }
 
-bool deflate_inner(std::vector<uint8_t>& output, bit_stream& bs, const huffman_tree& lit_len_tree, const huffman_tree& dist_tree)
+class output_buffer {
+public:
+    void put(uint8_t c) {
+        assert(used() < capacity());
+        buffer_[used_++] = c;
+    }
+
+    void add_used(int used) {
+        assert(used <= avail());
+        used_ += used;
+    }
+
+    int used() const {
+        return used_;
+    }
+
+    int avail() const {
+        return capacity() - used();
+    }
+
+    int capacity() const {
+        return static_cast<int>(buffer_.size());
+    }
+
+    uint8_t* ptr() {
+        return &buffer_[0];
+    }
+
+    void enlarge() {
+        buffer_.resize(buffer_.size() + 32768);
+    }
+
+    auto steal_buffer() {
+        buffer_.resize(used());
+        return std::move(buffer_);
+    }
+
+private:
+    std::vector<uint8_t> buffer_;
+    int                  used_ = 0;
+};
+
+bool deflate_inner(output_buffer& output, bit_stream& bs, const huffman_tree& lit_len_tree, const huffman_tree& dist_tree)
 {
     enum alphabet {
         lit_min      = 0,
@@ -62,12 +107,16 @@ bool deflate_inner(std::vector<uint8_t>& output, bit_stream& bs, const huffman_t
     };
 
     for (;;) {
+        if (output.avail() < max_match_length) {
+            output.enlarge();
+        }
+
         // decode literal/length value from input stream
         const int value = decode(lit_len_tree, bs);
         if (value <= lit_max) {
             // if value < 256
             //    copy value (literal byte) to output stream
-            output.push_back(static_cast<uint8_t>(value));
+            output.put(static_cast<uint8_t>(value));
             //std::cout << "Lit " << litrep(value) << "\n";
         } else if (value == end_of_block) {
             // if value = end of block (256)
@@ -85,6 +134,7 @@ bool deflate_inner(std::vector<uint8_t>& output, bit_stream& bs, const huffman_t
             if (eb) {
                 len += bs.get_bits(eb);
             }
+            assert(len >= 3 && len <= max_match_length);
 
             int dist = decode(dist_tree, bs);
             const int dist_extra_bits = distance_extra_bits[dist];
@@ -94,12 +144,12 @@ bool deflate_inner(std::vector<uint8_t>& output, bit_stream& bs, const huffman_t
             }
 
             //std::cout << "<" << len << ", " << dist_bytes << ">" << std::endl;
-            const int old_size = static_cast<int>(output.size());
+            const int old_size = output.used();
             if (dist_bytes > old_size) {
                 return false;
             }
-            output.resize(old_size + len);
-            copy_match(&output[0], old_size, dist_bytes, len);
+            copy_match(output.ptr(), old_size, dist_bytes, len);
+            output.add_used(len);
         }
     }
 }
@@ -173,7 +223,7 @@ std::vector<uint8_t> deflate(bit_stream& bs)
     static const auto default_lit_len_tree = make_huffman_tree(make_default_huffman_table(), 9);
     static const auto default_dist_tree    = make_huffman_tree(make_default_huffman_len_table(), 5);
 
-    std::vector<uint8_t> output;
+    output_buffer output;
     bool last_block = false;
     while (!last_block) {
         // Block header bits
@@ -209,7 +259,7 @@ std::vector<uint8_t> deflate(bit_stream& bs)
             invalid();
         }
     }
-    return output;
+    return output.steal_buffer();
 }
 
 } // namespace deflate
